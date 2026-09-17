@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the leading v"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, publish and update the cask
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+      - name: Build
+        env:
+          # Optional. Set these repository secrets to ship a properly signed
+          # and notarised build; without them the app is ad-hoc signed and the
+          # cask clears the quarantine flag on install instead.
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: Scripts/build-app.sh "${{ steps.version.outputs.version }}"
+
+      - name: Package
+        id: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARCHIVE="Softfall-$VERSION.zip"
+          # ditto preserves the bundle's symlinks and signature; plain zip
+          # does not, and produces an app macOS refuses to launch.
+          ditto -c -k --keepParent --sequesterRsrc dist/Softfall.app "$ARCHIVE"
+          SHA=$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "sha256 = $SHA"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "v$VERSION" \
+            --title "Softfall $VERSION" \
+            --generate-notes \
+            "${{ steps.package.outputs.archive }}" \
+            || gh release upload "v$VERSION" "${{ steps.package.outputs.archive }}" --clobber
+
+      - name: Point the cask at this release
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA="${{ steps.package.outputs.sha }}"
+          CASK=Casks/softfall.rb
+
+          /usr/bin/sed -i '' -E "s|^  version \".*\"$|  version \"$VERSION\"|" "$CASK"
+          /usr/bin/sed -i '' -E "s|^  sha256 .*$|  sha256 \"$SHA\"|" "$CASK"
+
+          echo "--- updated cask ---"
+          head -n 6 "$CASK"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$CASK"
+          if git diff --cached --quiet; then
+            echo "Cask already current."
+          else
+            git commit -m "Point the cask at $VERSION"
+            git push origin HEAD:main
+          fi

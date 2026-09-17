@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and bundle
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          sw_vers
+
+      # Debug first: it is the fastest way to surface a compile error.
+      - name: Compile
+        run: swift build -c debug
+
+      - name: Build the app bundle
+        run: Scripts/build-app.sh 0.0.0-ci
+
+      - name: Verify the bundle
+        run: |
+          APP=dist/Softfall.app
+          test -x "$APP/Contents/MacOS/Softfall"
+          test -f "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          echo "--- architectures ---"
+          lipo -info "$APP/Contents/MacOS/Softfall"
+          echo "--- signature ---"
+          codesign -dv "$APP" 2>&1 | head -n 5
+          echo "--- LSUIElement (must be 1 for a menu bar app) ---"
+          /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Softfall-app
+          path: dist/Softfall.app
+          retention-days: 14
