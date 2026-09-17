@@ -69,7 +69,10 @@ private final class Synth {
 }
 
 /// The audio side of the app.
-final class SoundEngine {
+///
+/// Inherits NSObject because it observes an AVAudioEngine notification by
+/// selector, and `@objc` members are only permitted on Objective-C classes.
+final class SoundEngine: NSObject {
 
     private let engine = AVAudioEngine()
     private var sourceNode: AVAudioSourceNode?
@@ -77,10 +80,12 @@ final class SoundEngine {
     private var isRunning = false
     private let indexOf: [Layer: Int]
 
-    init() {
+    override init() {
         var map: [Layer: Int] = [:]
         for (i, layer) in Layer.allCases.enumerated() { map[layer] = i }
         indexOf = map
+
+        super.init()
 
         NotificationCenter.default.addObserver(
             self,
