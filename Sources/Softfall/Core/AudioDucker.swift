@@ -36,30 +36,34 @@ final class AudioDucker {
     private var musicLive = false
     private var target: Double = 1.0
     private var rampTimer: Timer?
+    /// Block-based observers are identified by the token the call returns;
+    /// passing `self` to removeObserver would not unregister them.
+    private var observers: [NSObjectProtocol] = []
 
     init() {
         let centre = DistributedNotificationCenter.default()
 
-        centre.addObserver(
+        observers.append(centre.addObserver(
             forName: NSNotification.Name("com.apple.Music.playerInfo"),
             object: nil,
             queue: .main
         ) { [weak self] note in
             self?.handlePlayerInfo(note)
-        }
+        })
 
-        centre.addObserver(
+        observers.append(centre.addObserver(
             forName: NSNotification.Name("com.spotify.client.PlaybackStateChanged"),
             object: nil,
             queue: .main
         ) { [weak self] note in
             self?.handlePlayerInfo(note)
-        }
+        })
     }
 
     deinit {
         rampTimer?.invalidate()
-        DistributedNotificationCenter.default().removeObserver(self)
+        let centre = DistributedNotificationCenter.default()
+        for observer in observers { centre.removeObserver(observer) }
     }
 
     // MARK: Signals
