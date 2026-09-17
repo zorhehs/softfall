@@ -8,13 +8,17 @@ import AppKit
 final class OverlayWindow: NSWindow {
 
     init(screen: NSScreen) {
+        // The variant taking `screen:` is a convenience initializer, and a
+        // subclass has to go through a designated one. Passing the screen's
+        // frame as the content rect places the window on that display anyway,
+        // because screen frames are already in global coordinates.
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
+        setFrame(screen.frame, display: false)
 
         isOpaque = false
         backgroundColor = .clear
