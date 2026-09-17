@@ -7,7 +7,7 @@ import IOKit.ps
 ///
 /// An ambient app that quietly drains a laptop is not relaxing, so this is
 /// treated as a feature rather than an optimisation.
-final class PowerMonitor {
+final class PowerMonitor: NSObject {
 
     private(set) var onBattery = false
     private(set) var lowPowerMode = false
@@ -21,10 +21,11 @@ final class PowerMonitor {
 
     var onChange: (() -> Void)?
 
-    private var runLoopSource: CFRunLoopSource?
     private var pollTimer: Timer?
 
-    init() {
+    override init() {
+        super.init()
+
         refreshPowerSource()
         lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 

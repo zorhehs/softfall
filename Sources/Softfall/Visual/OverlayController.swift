@@ -1,7 +1,7 @@
 import AppKit
 
 /// Owns one overlay window per display and keeps them in step with the mix.
-final class OverlayController {
+final class OverlayController: NSObject {
 
     private struct Screen {
         let window: OverlayWindow
@@ -19,6 +19,8 @@ final class OverlayController {
 
     init(state: MixState) {
         self.state = state
+        super.init()
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenLayoutChanged),
