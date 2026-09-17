@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController!
     private var lightning: LightningDirector!
     private var power: PowerMonitor!
+    private var ducker: AudioDucker!
     private var menuBar: MenuBarController!
     private var window: MainWindowController!
     private var appMenu: AppMenuController!
@@ -24,6 +25,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         power = PowerMonitor()
         power.onChange = { [weak self] in self?.applyPowerPolicy() }
+
+        ducker = AudioDucker()
+        ducker.onChange = { [weak self] in
+            guard let self, let state = self.state else { return }
+            state.duckMultiplier = self.ducker.multiplier
+            // Only the audio needs updating during a fade; the picture and the
+            // rest of the UI are unaffected by ducking.
+            self.sound.apply(state)
+        }
+        ducker.onStateChange = { [weak self] in
+            guard let self, let state = self.state else { return }
+            state.isDucked = self.ducker.isDucking
+        }
 
         window = MainWindowController(state: state)
 
@@ -85,6 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.updateIcon()
         applyPowerPolicy()
         syncLoginItem()
+        ducker.duckForCalls = state.duckOnCalls
+        ducker.duckForMusic = state.duckOnMusic
 
         // Restart the storm schedule only when something that affects it
         // changed, so adjusting an unrelated setting never resets the timing.
@@ -146,6 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func tick() {
         guard let state else { return }
+
+        // The microphone check rides on this existing timer rather than
+        // starting one of its own.
+        ducker.poll()
 
         guard let end = state.sleepTimerEndsAt else {
             if state.fadeMultiplier != 1.0 {

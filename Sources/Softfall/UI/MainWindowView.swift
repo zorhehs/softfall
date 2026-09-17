@@ -114,6 +114,7 @@ struct MainWindowView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 thisScene
+                ducking
                 appearance
                 displays
                 behaviour
@@ -166,6 +167,22 @@ struct MainWindowView: View {
                 trailing: "\(Int(state.masterVolume * 100))%"
             )
         }
+    }
+
+    /// Ported from the popover this window replaced. The controls came from
+    /// the auto-ducking work on `develop`; deleting that panel must not delete
+    /// the only way to reach them.
+    private var ducking: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            SectionLabel("When something else is playing")
+            Toggle("Quieten during calls", isOn: $state.duckOnCalls)
+                .help("Fades down whenever the microphone goes live, and back up afterwards.")
+            Toggle("Quieten while music plays", isOn: $state.duckOnMusic)
+                .help("Follows Apple Music and Spotify.")
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .font(.system(size: 11.5))
     }
 
     private var appearance: some View {

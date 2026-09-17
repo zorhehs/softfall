@@ -92,6 +92,10 @@ An ambient app earns its place by not competing for attention.
   battery is there too, but **off** by default — being unplugged is not a
   request for an invisible app. Sound always carries on; it is the cheap part.
   Visuals do stop entirely when the display sleeps or the screen locks.
+- **It quietens for calls.** When the microphone goes live, Softfall fades
+  down to a murmur and comes back up afterwards. It watches the input device
+  rather than a list of apps, so it works for Zoom, Meet, FaceTime, Teams,
+  Slack huddles, Discord — anything. It follows Apple Music and Spotify too.
 - **Sleep timer.** Fades out across the last two minutes rather than cutting
   off, so drifting off doesn't end with a click.
 - **It won't show up in screen shares.** The overlay excludes itself from
@@ -150,12 +154,12 @@ Work in progress lives on [`develop`](../../tree/develop).
 - More scenes: snow, wind over grass, water
 - Global hotkey to show and hide everything
 - Save your own mixes as named scenes
-- Duck automatically when a call starts or music plays
 - Match your actual local weather, opt in
 - Warm and dim the scene after sunset
 - Per-display layer choices, not just on/off
 - Honour the system *Reduce Motion* setting
 - A gentle breathing pacer you can overlay
+- Unit tests for the DSP, run on every push
 
 ## License
 
