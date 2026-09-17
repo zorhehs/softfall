@@ -190,6 +190,13 @@ struct ControlPanelView: View {
                             .controlSize(.small)
                     }
 
+                    Toggle("Quieten during calls", isOn: $state.duckOnCalls)
+                        .help("Fades down whenever the microphone goes live, and back up afterwards.")
+                    Toggle("Quieten while music plays", isOn: $state.duckOnMusic)
+                        .help("Follows Apple Music and Spotify.")
+
+                    Divider().padding(.vertical, 2)
+
                     Toggle("Calm mode", isOn: $state.calmMode)
                         .help("Fewer particles, softer contrast.")
                     Toggle("Show on all displays", isOn: $state.allDisplays)

@@ -46,6 +46,9 @@ final class MixState: ObservableObject {
 
     // MARK: Behaviour
 
+    /// Step aside when something else needs to be heard.
+    @Published var duckOnCalls: Bool = true
+    @Published var duckOnMusic: Bool = true
     @Published var pauseVisualsWhenFullScreen: Bool = true
     /// Off by default. Being unplugged is not a request for an invisible app.
     @Published var pauseVisualsOnBattery: Bool = false
@@ -60,6 +63,13 @@ final class MixState: ObservableObject {
 
     @Published var sleepTimerEndsAt: Date?
     @Published var fadeMultiplier: Double = 1.0
+
+    /// Set by the ducker, thirty times a second during a fade. Deliberately
+    /// not `@Published`: republishing it would rebuild the whole UI and
+    /// refresh every overlay window on each frame of the ramp.
+    var duckMultiplier: Double = 1.0
+    /// The transition only, which is cheap enough to publish.
+    @Published var isDucked: Bool = false
 
     // MARK: Wiring
 
@@ -101,7 +111,7 @@ final class MixState: ObservableObject {
     /// A layer the current scene does not use is simply silent.
     func effectiveGain(_ layer: Layer) -> Double {
         guard isPlaying, current.sound, scene.layers.contains(layer) else { return 0 }
-        return current.level * scene.weight(for: layer) * masterVolume * fadeMultiplier
+        return current.level * scene.weight(for: layer) * masterVolume * fadeMultiplier * duckMultiplier
     }
 
     /// Particle density for one engine layer.
@@ -142,6 +152,10 @@ final class MixState: ObservableObject {
         var pauseVisualsOnBattery: Bool
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
+        // Optional so that settings saved by an earlier version still decode
+        // rather than being thrown away wholesale.
+        var duckOnCalls: Bool?
+        var duckOnMusic: Bool?
     }
 
     func save() {
@@ -158,7 +172,9 @@ final class MixState: ObservableObject {
             opacity: opacity,
             pauseVisualsOnBattery: pauseVisualsOnBattery,
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            duckOnCalls: duckOnCalls,
+            duckOnMusic: duckOnMusic
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
@@ -185,6 +201,8 @@ final class MixState: ObservableObject {
         pauseVisualsOnBattery = stored.pauseVisualsOnBattery
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
+        duckOnCalls = stored.duckOnCalls ?? true
+        duckOnMusic = stored.duckOnMusic ?? true
     }
 
     static var defaultSettings: [Scene: SceneSettings] {
