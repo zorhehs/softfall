@@ -195,12 +195,16 @@ final class SceneLayers {
 
             if rate <= 0 {
                 emitter.setValue(0, forKeyPath: "emitterCells.\(layer.rawValue).birthRate")
-                // Leave the layer up for one lifetime so particles already in
-                // flight finish falling instead of vanishing mid-air.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak emitter] in
-                    if let e = emitter,
-                       (e.value(forKeyPath: "emitterCells.\(layer.rawValue).birthRate") as? Float ?? 0) <= 0 {
-                        e.isHidden = true
+                // Only on the transition to off. Scheduling this every time an
+                // already-idle layer is visited would queue a block per layer
+                // per update, which during a slider drag is hundreds a second.
+                if !wasOff {
+                    // Leave the layer up for a moment so particles already in
+                    // flight finish falling instead of vanishing mid-air.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak emitter] in
+                        guard let e = emitter else { return }
+                        let current = e.value(forKeyPath: "emitterCells.\(layer.rawValue).birthRate") as? Float ?? 0
+                        if current <= 0 { e.isHidden = true }
                     }
                 }
                 continue

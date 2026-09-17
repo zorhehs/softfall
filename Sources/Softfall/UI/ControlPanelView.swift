@@ -68,6 +68,7 @@ struct ControlPanelView: View {
     }
 
     private var statusLine: String {
+        if state.isDucked { return "Quietened — something else is playing" }
         if let text = sleepText { return text }
         if !state.isPlaying { return "Paused" }
         let count = state.activeCount
@@ -200,6 +201,13 @@ struct ControlPanelView: View {
                         systemImage: "circle.lefthalf.filled",
                         value: $state.opacity
                     )
+
+                    Toggle("Quieten during calls", isOn: $state.duckOnCalls)
+                        .help("Fades down whenever the microphone goes live, and back up afterwards.")
+                    Toggle("Quieten while music plays", isOn: $state.duckOnMusic)
+                        .help("Follows Apple Music and Spotify.")
+
+                    Divider().padding(.vertical, 2)
 
                     Toggle("Calm mode", isOn: $state.calmMode)
                         .help("Fewer particles, slower movement, softer contrast.")
