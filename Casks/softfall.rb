@@ -1,6 +1,6 @@
 cask "softfall" do
-  version "0.0.0"
-  sha256 :no_check
+  version "0.1.0"
+  sha256 "2640bd974278193d258dde836c987d6fff5c2085e1418edf576eadd6b3d61194"
 
   url "https://github.com/zorhehs/softfall/releases/download/v#{version}/Softfall-#{version}.zip"
   name "Softfall"
