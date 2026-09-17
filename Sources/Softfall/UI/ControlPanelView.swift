@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ControlPanelView: View {
     @ObservedObject var state: MixState
-    @State private var showMixer = false
     @State private var showSettings = false
     var onQuit: () -> Void
 
@@ -13,18 +12,18 @@ struct ControlPanelView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    presets
-                    mixer
+                    scenes
+                    controls
                     settings
                 }
                 .padding(16)
             }
-            .frame(maxHeight: 460)
+            .frame(maxHeight: 420)
 
             Divider()
             footer
         }
-        .frame(width: 348)
+        .frame(width: 332)
     }
 
     // MARK: Header
@@ -39,7 +38,7 @@ struct ControlPanelView: View {
                     .foregroundStyle(state.isPlaying ? Color.accentColor : Color.secondary)
             }
             .buttonStyle(.plain)
-            .help(state.isPlaying ? "Pause everything" : "Resume")
+            .help(state.isPlaying ? "Pause" : "Resume")
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Softfall")
@@ -59,7 +58,7 @@ struct ControlPanelView: View {
                     .frame(width: 14)
                 Slider(value: $state.masterVolume, in: 0...1)
                     .controlSize(.small)
-                    .frame(width: 84)
+                    .frame(width: 80)
             }
             .help("Overall volume")
         }
@@ -68,14 +67,11 @@ struct ControlPanelView: View {
     }
 
     private var statusLine: String {
-        if state.isDucked { return "Quietened — something else is playing" }
+        if let notice = state.visualNotice { return notice }
         if let text = sleepText { return text }
         if !state.isPlaying { return "Paused" }
-        let count = state.activeCount
-        if count == 0 { return "Nothing playing" }
-        let active = Layer.allCases.filter { state.settings($0).isActive }
-        return active.prefix(3).map(\.title).joined(separator: " · ")
-            + (count > 3 ? " +\(count - 3)" : "")
+        if !state.current.isActive { return "Nothing playing" }
+        return state.scene.blurb
     }
 
     private var sleepText: String? {
@@ -86,76 +82,62 @@ struct ControlPanelView: View {
         return minutes > 0 ? "Fading out in \(minutes)m" : "Fading out in \(seconds)s"
     }
 
-    // MARK: Presets
+    // MARK: Scenes
 
-    private var presets: some View {
+    private var scenes: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionLabel("Scenes")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
-                ForEach(Preset.all) { preset in
-                    PresetChip(preset: preset, isActive: state.matches(preset)) {
-                        withAnimation(.easeOut(duration: 0.2)) { state.apply(preset) }
+            SectionLabel("Scene")
+            HStack(spacing: 8) {
+                ForEach(Scene.allCases) { scene in
+                    SceneButton(scene: scene, isActive: state.scene == scene) {
+                        withAnimation(.easeOut(duration: 0.18)) { state.select(scene) }
                     }
                 }
             }
         }
     }
 
-    // MARK: Mixer
+    // MARK: Picture / sound
 
-    private var mixer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { showMixer.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    SectionLabel("Mix")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(showMixer ? 90 : 0))
-                    Spacer()
-                    if !showMixer {
-                        Text("\(state.activeCount) on")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Two switches, not one. Rain on screen in silence and rain in
+            // your ears with a still desktop are both things people want.
+            HStack(spacing: 8) {
+                SwitchTile(
+                    title: "Picture",
+                    symbol: state.current.picture ? "eye.fill" : "eye.slash",
+                    isOn: state.current.picture
+                ) {
+                    state.updateCurrent { $0.picture.toggle() }
                 }
-                .contentShape(Rectangle())
+                SwitchTile(
+                    title: "Sound",
+                    symbol: state.current.sound ? "speaker.wave.2.fill" : "speaker.slash",
+                    isOn: state.current.sound
+                ) {
+                    state.updateCurrent { $0.sound.toggle() }
+                }
             }
-            .buttonStyle(.plain)
 
-            if showMixer {
-                VStack(alignment: .leading, spacing: 14) {
-                    // The two icon buttons on each row are the point: picture
-                    // and sound are separate switches, so you can have rain you
-                    // can only see, or rain you can only hear.
-                    HStack(spacing: 0) {
-                        Text("Picture and sound switch independently")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                    }
-
-                    ForEach(LayerGroup.allCases) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(group.title.uppercased())
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .tracking(0.6)
-                            ForEach(group.layers) { layer in
-                                LayerRow(layer: layer, state: state)
-                            }
-                        }
-                    }
-
-                    Button("Turn everything off") {
-                        withAnimation(.easeOut(duration: 0.2)) { state.silenceAll() }
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Amount")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int(state.current.level * 100))%")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                Slider(
+                    value: Binding(
+                        get: { state.current.level },
+                        set: { v in state.updateCurrent { $0.level = v } }
+                    ),
+                    in: 0.02...1
+                )
+                .controlSize(.small)
             }
         }
     }
@@ -180,7 +162,7 @@ struct ControlPanelView: View {
             .buttonStyle(.plain)
 
             if showSettings {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 13) {
                     VStack(alignment: .leading, spacing: 6) {
                         Picker("", selection: $state.placement) {
                             ForEach(OverlayPlacement.allCases) { placement in
@@ -196,11 +178,17 @@ struct ControlPanelView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    LabeledSlider(
-                        title: "Visibility",
-                        systemImage: "circle.lefthalf.filled",
-                        value: $state.opacity
-                    )
+                    HStack(spacing: 8) {
+                        Image(systemName: "circle.lefthalf.filled")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14)
+                        Text("Visibility")
+                            .font(.system(size: 11))
+                            .frame(width: 58, alignment: .leading)
+                        Slider(value: $state.opacity, in: 0.15...1)
+                            .controlSize(.small)
+                    }
 
                     Toggle("Quieten during calls", isOn: $state.duckOnCalls)
                         .help("Fades down whenever the microphone goes live, and back up afterwards.")
@@ -210,12 +198,12 @@ struct ControlPanelView: View {
                     Divider().padding(.vertical, 2)
 
                     Toggle("Calm mode", isOn: $state.calmMode)
-                        .help("Fewer particles, slower movement, softer contrast.")
+                        .help("Fewer particles, softer contrast.")
                     Toggle("Show on all displays", isOn: $state.allDisplays)
                     Toggle("Hide over full-screen apps", isOn: $state.pauseVisualsWhenFullScreen)
                         .help("Leaves films, presentations and full-screen editors untouched.")
-                    Toggle("Pause visuals on battery", isOn: $state.pauseVisualsOnBattery)
-                        .help("Sound keeps playing; only the animation stops.")
+                    Toggle("Pause animation on battery", isOn: $state.pauseVisualsOnBattery)
+                        .help("Off by default. Sound always keeps playing.")
                     Toggle("Open at login", isOn: $state.launchAtLogin)
                 }
                 .toggleStyle(.switch)
@@ -258,129 +246,65 @@ struct ControlPanelView: View {
     }
 }
 
-// MARK: - Row
+// MARK: - Components
 
-private struct LayerRow: View {
-    let layer: Layer
-    @ObservedObject var state: MixState
-
-    private var settings: LayerSettings { state.settings(layer) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Image(systemName: layer.symbol)
-                    .font(.system(size: 13))
-                    .frame(width: 18)
-                    .foregroundStyle(settings.isActive ? Color.accentColor : Color.secondary)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(layer.title)
-                        .font(.system(size: 12, weight: settings.isActive ? .medium : .regular))
-                    if settings.isActive {
-                        Text(layer.subtitle)
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 4)
-
-                IconToggle(
-                    on: settings.visual,
-                    enabled: layer.hasVisual,
-                    onSymbol: "eye.fill",
-                    offSymbol: "eye.slash",
-                    help: layer.hasVisual ? "Show on screen" : "This layer has no picture"
-                ) {
-                    state.update(layer) { $0.visual.toggle() }
-                }
-
-                IconToggle(
-                    on: settings.sound,
-                    enabled: layer.hasAudio,
-                    onSymbol: "speaker.wave.2.fill",
-                    offSymbol: "speaker.slash",
-                    help: layer.hasAudio ? "Play its sound" : "This layer has no sound"
-                ) {
-                    state.update(layer) { $0.sound.toggle() }
-                }
-            }
-
-            if settings.isActive {
-                Slider(
-                    value: Binding(
-                        get: { settings.level },
-                        set: { newValue in state.update(layer) { $0.level = newValue } }
-                    ),
-                    in: 0.02...1
-                )
-                .controlSize(.mini)
-                .padding(.leading, 28)
-            }
-        }
-        .animation(.easeOut(duration: 0.18), value: settings.isActive)
-    }
-}
-
-// MARK: - Small components
-
-private struct IconToggle: View {
-    let on: Bool
-    let enabled: Bool
-    let onSymbol: String
-    let offSymbol: String
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: on ? onSymbol : offSymbol)
-                .font(.system(size: 11))
-                .frame(width: 22, height: 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(on ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.05))
-                )
-                .foregroundStyle(on ? Color.accentColor : Color.secondary)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.25)
-        .help(help)
-    }
-}
-
-private struct PresetChip: View {
-    let preset: Preset
+private struct SceneButton: View {
+    let scene: Scene
     let isActive: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: preset.symbol)
-                    .font(.system(size: 15, weight: .light))
-                Text(preset.title)
-                    .font(.system(size: 10, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+            VStack(spacing: 6) {
+                Image(systemName: scene.symbol)
+                    .font(.system(size: 17, weight: .light))
+                Text(scene.title)
+                    .font(.system(size: 11, weight: .medium))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
+            .padding(.vertical, 13)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(isActive ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(isActive ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+                    .strokeBorder(isActive ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
             )
             .foregroundStyle(isActive ? Color.accentColor : Color.primary.opacity(0.75))
         }
         .buttonStyle(.plain)
-        .help(preset.blurb)
+        .help(scene.blurb)
+    }
+}
+
+private struct SwitchTile: View {
+    let title: String
+    let symbol: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12))
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 12, weight: isOn ? .medium : .regular))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isOn ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+            )
+            .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? "\(title) is on" : "\(title) is off")
     }
 }
 
@@ -392,25 +316,5 @@ private struct SectionLabel: View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.secondary)
-    }
-}
-
-private struct LabeledSlider: View {
-    let title: String
-    let systemImage: String
-    @Binding var value: Double
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
-            Text(title)
-                .font(.system(size: 11))
-                .frame(width: 60, alignment: .leading)
-            Slider(value: $value, in: 0.15...1)
-                .controlSize(.small)
-        }
     }
 }

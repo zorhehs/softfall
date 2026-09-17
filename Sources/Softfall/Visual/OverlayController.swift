@@ -116,17 +116,6 @@ final class OverlayController: NSObject {
 
         if targetScreens.count != screens.count { rebuild() }
 
-        // Wind drives the slant of rain and snow. If the breeze is audible
-        // but hidden, it still bends the weather — just by less, so the
-        // picture never contradicts what you can hear.
-        let wind = state.settings(.wind)
-        var windLevel = 0.0
-        if state.effectiveDensity(.wind) > 0 {
-            windLevel = wind.level
-        } else if wind.sound && state.isPlaying {
-            windLevel = wind.level * 0.5
-        }
-
         let visible = !suspended && state.anyVisualActive
         let fullScreenPolicy = !state.pauseVisualsWhenFullScreen
         let needsConfigure = appliedPlacement != state.placement
@@ -141,7 +130,7 @@ final class OverlayController: NSObject {
                     showOverFullScreenApps: fullScreenPolicy
                 )
             }
-            screen.scene.update(state: state, windLevel: windLevel)
+            screen.scene.update(state: state)
 
             if visible {
                 if !screen.window.isVisible { screen.window.orderFrontRegardless() }
@@ -162,7 +151,7 @@ final class OverlayController: NSObject {
 
     func flashLightning(distance: Double) {
         guard let state, state.isPlaying, !suspended else { return }
-        guard state.settings(.thunder).visual else { return }
+        guard state.scene == .thunder, state.current.picture else { return }
         for (_, screen) in screens {
             screen.scene.flashLightning(distance: distance, opacityScale: state.opacity)
         }
@@ -204,8 +193,8 @@ final class LightningDirector {
         timer?.invalidate()
         guard let state else { return }
 
-        let settings = state.settings(.thunder)
-        let active = state.isPlaying && (settings.visual || settings.sound) && settings.level > 0.01
+        let settings = state.current
+        let active = state.isPlaying && state.scene == .thunder && settings.isActive
         guard active else {
             // Idle poll — cheap, and picks the storm straight back up when
             // thunder is switched on.
@@ -229,8 +218,8 @@ final class LightningDirector {
     }
 
     private func strike() {
-        guard let state, state.isPlaying else { scheduleNext(); return }
-        let settings = state.settings(.thunder)
+        guard let state, state.isPlaying, state.scene == .thunder else { scheduleNext(); return }
+        let settings = state.current
 
         // Higher intensity pulls the storm closer, but never all the way —
         // a little distance is what keeps thunder pleasant rather than startling.
@@ -245,7 +234,7 @@ final class LightningDirector {
         let delay = 0.18 + distance * 4.6
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, let state = self.state, state.isPlaying,
-                  state.settings(.thunder).sound else { return }
+                  state.scene == .thunder, state.current.sound else { return }
             self.sound?.strikeThunder(distance: distance)
         }
 

@@ -11,24 +11,17 @@ import AVFoundation
 /// be the genuinely dangerous choice.
 private final class Synth {
     let sampleRate: Double
-    let count = Layer.allCases.count
     /// Snapshotted at init. `Layer.allCases` is computed and allocates a fresh
     /// array on every access, which must never happen on the audio thread.
     let kinds: [Layer] = Layer.allCases
+    let count = Layer.allCases.count
 
     var rain: RainVoice
-    var snow: SnowVoice
-    var wind: WindVoice
     var thunderA: ThunderVoice
     var thunderB: ThunderVoice
-    var ocean: OceanVoice
-    var stream: StreamVoice
     var fire: FireVoice
-    var drone: DroneVoice
 
-    /// Target gain per layer, indexed by `Layer.allCases`.
     var gains: [Double]
-    /// Raw 0...1 level per layer, used as a timbre control rather than volume.
     var levels: [Double]
     var smoothers: [Smoothed]
     var masterSmoother: Smoothed
@@ -42,14 +35,9 @@ private final class Synth {
         self.sampleRate = sampleRate
         let seed = UInt64(Date().timeIntervalSince1970 * 1000) | 1
         rain = RainVoice(sampleRate: sampleRate, seed: seed)
-        snow = SnowVoice(sampleRate: sampleRate, seed: seed &+ 1000)
-        wind = WindVoice(sampleRate: sampleRate, seed: seed &+ 2000)
         thunderA = ThunderVoice(sampleRate: sampleRate, seed: seed &+ 3000)
         thunderB = ThunderVoice(sampleRate: sampleRate, seed: seed &+ 3500)
-        ocean = OceanVoice(sampleRate: sampleRate, seed: seed &+ 4000)
-        stream = StreamVoice(sampleRate: sampleRate, seed: seed &+ 5000)
         fire = FireVoice(sampleRate: sampleRate, seed: seed &+ 6000)
-        drone = DroneVoice(sampleRate: sampleRate, seed: seed &+ 7000)
 
         gains = Array(repeating: 0, count: count)
         levels = Array(repeating: 0.5, count: count)
@@ -158,19 +146,14 @@ final class SoundEngine: NSObject {
 
                     let f: Frame
                     switch synth.kinds[index] {
-                    case .rain:      f = synth.rain.render(intensity: level)
-                    case .snow:      f = synth.snow.render(intensity: level)
-                    case .wind:      f = synth.wind.render(intensity: level)
+                    case .rain:
+                        f = synth.rain.render(intensity: level)
                     case .thunder:
                         let a = synth.thunderA.render()
                         let b = synth.thunderB.render()
                         f = (a.l + b.l, a.r + b.r)
-                    case .fog, .fireflies:
-                        continue                       // visual-only layers
-                    case .ocean:     f = synth.ocean.render(intensity: level)
-                    case .stream:    f = synth.stream.render(intensity: level)
-                    case .embers:    f = synth.fire.render(intensity: level)
-                    case .drone:     f = synth.drone.render(intensity: level)
+                    case .embers:
+                        f = synth.fire.render(intensity: level)
                     }
 
                     l += f.l * g
@@ -204,14 +187,12 @@ final class SoundEngine: NSObject {
 
     // MARK: Parameters
 
-    /// Push the whole mix down to the audio thread. Cheap enough to call on
-    /// every UI change.
     func apply(_ state: MixState) {
         guard let synth else { return }
         for layer in Layer.allCases {
             guard let index = indexOf[layer] else { continue }
             synth.gains[index] = state.effectiveGain(layer)
-            synth.levels[index] = state.settings(layer).level
+            synth.levels[index] = state.level(layer)
         }
         synth.master = state.isPlaying ? 1.0 : 0.0
     }
