@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var tickTimer: Timer?
     private var lastThunderSettings: LayerSettings?
+    private var lastSuspend: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         state = MixState()
@@ -70,9 +71,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let state, let power, let overlay else { return }
 
         // Sound is never suspended for power — it is the quiet part and costs
-        // almost nothing. Only the animation stops.
-        let batterySaver = state.pauseVisualsOnBattery && (power.onBattery || power.lowPowerMode)
-        overlay.setSuspended(power.shouldSuspendVisuals || batterySaver)
+        // almost nothing. Only the animation is ever affected.
+        //
+        // Low Power Mode thins the scene rather than stopping it. Hiding the
+        // picture outright with no explanation is how an ambient app gets
+        // mistaken for a broken one.
+        let batterySaver = state.pauseVisualsOnBattery && power.onBattery
+        let suspend = power.shouldSuspendVisuals || batterySaver
+
+        if state.powerSaving != power.lowPowerMode {
+            state.powerSaving = power.lowPowerMode
+        }
+
+        let notice: String?
+        if power.screenLocked {
+            notice = nil                                  // nobody is looking
+        } else if power.displaysAsleep {
+            notice = nil
+        } else if batterySaver {
+            notice = "Animation paused on battery"
+        } else if power.lowPowerMode {
+            notice = "Thinned out for Low Power Mode"
+        } else {
+            notice = nil
+        }
+
+        // Assigning an identical value to a @Published property still fires
+        // objectWillChange, which would loop straight back into here.
+        if state.visualNotice != notice {
+            state.visualNotice = notice
+        }
+
+        // Worth a line in the console: "I can see nothing on screen" should
+        // always have a findable answer.
+        if lastSuspend != suspend {
+            lastSuspend = suspend
+            if suspend {
+                NSLog("Softfall: animation suspended (battery: \(power.onBattery), low power: \(power.lowPowerMode), display asleep: \(power.displaysAsleep), locked: \(power.screenLocked))")
+            } else {
+                NSLog("Softfall: animation running")
+            }
+        }
+
+        overlay.setSuspended(suspend)
     }
 
     private func tick() {

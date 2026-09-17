@@ -206,8 +206,8 @@ struct ControlPanelView: View {
                     Toggle("Show on all displays", isOn: $state.allDisplays)
                     Toggle("Hide over full-screen apps", isOn: $state.pauseVisualsWhenFullScreen)
                         .help("Leaves films, presentations and full-screen editors untouched.")
-                    Toggle("Pause visuals on battery", isOn: $state.pauseVisualsOnBattery)
-                        .help("Sound keeps playing; only the animation stops.")
+                    Toggle("Pause animation on battery", isOn: $state.pauseVisualsOnBattery)
+                        .help("Off by default. Sound always keeps playing; only the animation stops.")
                     Toggle("Open at login", isOn: $state.launchAtLogin)
                 }
                 .toggleStyle(.switch)

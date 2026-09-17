@@ -45,7 +45,10 @@ final class MixState: ObservableObject {
 
     // MARK: Behaviour
 
-    @Published var pauseVisualsOnBattery: Bool = true
+    /// Off by default. Being unplugged is not a request for an invisible app,
+    /// and defaulting this on made Softfall look broken on any laptop that
+    /// happened not to be charging.
+    @Published var pauseVisualsOnBattery: Bool = false
     @Published var pauseVisualsWhenFullScreen: Bool = true
     @Published var launchAtLogin: Bool = false
 
@@ -60,7 +63,10 @@ final class MixState: ObservableObject {
     var onChange: (() -> Void)?
 
     private var cancellables = Set<AnyCancellable>()
-    private static let storageKey = "softfall.state.v1"
+    // Bumped from v1: the battery default changed, and a saved `true` from an
+    // earlier run would otherwise keep overriding it. Settings are cheap to
+    // set again at this stage; a mystifying invisible app is not.
+    private static let storageKey = "softfall.state.v2"
 
     init() {
         load()
@@ -100,8 +106,10 @@ final class MixState: ObservableObject {
     /// Anything visible right now.
     func effectiveDensity(_ layer: Layer) -> Double {
         guard isPlaying, layer.hasVisual else { return 0 }
-        let d = settings(layer).visualDensity
-        return calmMode ? d * 0.45 : d
+        var d = settings(layer).visualDensity
+        if calmMode { d *= 0.45 }
+        if powerSaving { d *= 0.5 }
+        return d
     }
 
     var anyVisualActive: Bool {
