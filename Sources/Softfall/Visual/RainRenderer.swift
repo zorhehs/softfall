@@ -179,7 +179,10 @@ final class RainLayer: CALayer {
     private func targetCount() -> Int {
         guard params.intensity > 0.001 else { return 0 }
         let i = min(max(params.intensity, 0), 1)
-        let base = 70 + i * i * 520 + i * 90
+        // Half the lab's curve. The lab was judged in a 1280x800 canvas inside
+        // a web page; the same relative density across a whole desktop you are
+        // trying to work under is simply too much weather.
+        let base = 40 + i * i * 250 + i * 55
         // The lab's stage was 1280 points wide. A wider screen needs more drops
         // for the same apparent density; there is no point scaling with height
         // too, because the speed scaling above already fills a tall screen.
@@ -374,7 +377,9 @@ final class RainLayer: CALayer {
     /// colour of the sky behind it.
     private func dropColour() -> (r: CGFloat, g: CGFloat, b: CGFloat) {
         let blue = min(max(params.blue, 0), 1)
-        return ((247 - blue * 126) / 255, (251 - blue * 62) / 255, 1.0)
+        // Widened from the lab's mapping, which only ever reached a pale tint.
+        // At 0 this is still white, so the slider spans the whole useful range.
+        return ((247 - blue * 190) / 255, (251 - blue * 110) / 255, 1.0)
     }
 
     private func buildSprites() {
@@ -445,7 +450,7 @@ final class DisplayLinkDriver: NSObject {
     /// subclass — hence a small class of its own rather than a closure.
     private var link: CADisplayLink?
     private var last: CFTimeInterval = 0
-    private var fps: Float = 0
+    private var rate: RainFrameRate?
 
     /// Seconds since the previous frame.
     var onFrame: ((CGFloat) -> Void)?
@@ -453,31 +458,37 @@ final class DisplayLinkDriver: NSObject {
     /// - Parameter view: the link is created from the view so that it follows
     ///   whichever display that view is on, including a mid-session drag from a
     ///   60 Hz panel to a ProMotion one.
-    func start(in view: NSView, fps: Float) {
+    func start(in view: NSView, rate: RainFrameRate) {
         if link != nil {
-            setFrameRate(fps)
+            setFrameRate(rate)
             link?.isPaused = false
             return
         }
         let created = view.displayLink(target: self, selector: #selector(step(_:)))
-        self.fps = 0
-        setFrameRate(fps, on: created)
+        self.rate = nil
+        apply(rate, to: created)
         created.add(to: .main, forMode: .common)
         last = 0
         link = created
     }
 
-    func setFrameRate(_ fps: Float) {
+    func setFrameRate(_ rate: RainFrameRate) {
         guard let link else { return }
-        setFrameRate(fps, on: link)
+        apply(rate, to: link)
     }
 
-    private func setFrameRate(_ fps: Float, on link: CADisplayLink) {
-        guard fps != self.fps else { return }
-        self.fps = fps
-        // Unlike a CALayer — which has no such property on macOS, whatever the
-        // documentation implies — a display link can genuinely be asked for a
-        // rate, and the window server will honour a range it can hit.
+    /// Unlike a CALayer — which has no such property on macOS, whatever the
+    /// documentation implies — a display link can genuinely be asked for a
+    /// rate, and the window server honours a range it can hit.
+    private func apply(_ rate: RainFrameRate, to link: CADisplayLink) {
+        guard rate != self.rate else { return }
+        self.rate = rate
+
+        if rate == .display {
+            link.preferredFrameRateRange = CAFrameRateRange.default
+            return
+        }
+        let fps = Float(rate.rawValue)
         link.preferredFrameRateRange = CAFrameRateRange(
             minimum: max(fps * 0.5, 15),
             maximum: fps,
@@ -497,7 +508,7 @@ final class DisplayLinkDriver: NSObject {
         link?.invalidate()
         link = nil
         last = 0
-        fps = 0
+        rate = nil
     }
 
     @objc private func step(_ link: CADisplayLink) {

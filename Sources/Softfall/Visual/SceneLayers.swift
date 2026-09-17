@@ -23,11 +23,10 @@ final class SceneLayers {
     private var scale: CGFloat = 2
     private var embersWereOff = true
 
-    /// Overall drop opacity, and how blue they are. Both were dialled in
-    /// against a real desktop rather than guessed — in the rain lab, over a
-    /// light desktop, a dark one and a photo wallpaper in turn.
+    /// Overall drop opacity, dialled in against a real desktop rather than
+    /// guessed. How blue the rain is comes from the mix state instead — that
+    /// one has to be judged against the wallpaper it will sit on.
     private static let dropOpacity: CGFloat = 0.55
-    private static let dropBlue: CGFloat = 0.70
 
     // MARK: Build
 
@@ -132,7 +131,7 @@ final class SceneLayers {
         let rainDensity = CGFloat(state.effectiveDensity(.rain))
         rain.params.intensity = rainDensity
         rain.params.dropOpacity = Self.dropOpacity
-        rain.params.blue = Self.dropBlue
+        rain.params.blue = CGFloat(state.rainBlue)
         // Calm mode is meant to be gentler, not merely thinner: slower drops
         // covering less ground per frame are what reads as calm.
         rain.params.speed = state.calmMode ? 0.75 : 1.0

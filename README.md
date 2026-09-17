@@ -96,10 +96,12 @@ An ambient app earns its place by not competing for attention.
 
 Rain is drawn by hand — a pre-rendered streak sprite blitted once per drop,
 rotated to face the direction it is actually travelling, stepped by a display
-link. That is why wind bends the rain instead of sliding it sideways. Embers
-are left to a Core Animation emitter, which is all a round glow needs. Both
-stop entirely when the display sleeps, the screen locks, or nothing is on
-screen.
+link. That is why wind bends the rain instead of sliding it sideways, and why
+the frame rate is yours to choose: 30, 60, or whatever your display can do.
+Thirty is the default and still reads as continuous, because a streak is
+longer than the distance it falls in one frame. Embers are left to a Core
+Animation emitter, which is all a round glow needs. Both stop entirely when
+the display sleeps, the screen locks, or nothing is on screen.
 
 ## Build it yourself
 

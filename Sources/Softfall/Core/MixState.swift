@@ -43,6 +43,14 @@ final class MixState: ObservableObject {
     /// Fewer particles, slower movement, softer contrast.
     @Published var calmMode: Bool = false
     @Published var opacity: Double = 0.85
+    /// 0 is white rain, 1 is a cold blue. Adjustable rather than baked in:
+    /// how blue rain can be before it vanishes depends entirely on the
+    /// wallpaper behind it, and this app has overshot that before.
+    @Published var rainBlue: Double = 0.85
+    /// How often the rain is drawn. Lower is cheaper and, at 30, still
+    /// continuous — a near streak is longer than the distance it travels in
+    /// one frame, so consecutive frames overlap.
+    @Published var frameRate: RainFrameRate = .thirty
 
     // MARK: Behaviour
 
@@ -145,6 +153,8 @@ final class MixState: ObservableObject {
         var pauseVisualsOnBattery: Bool
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
+        var rainBlue: Double?
+        var frameRate: RainFrameRate?
         /// Optional on purpose. A non-optional field added to this struct makes
         /// every previously saved blob fail to decode, which silently resets
         /// all of someone's settings on upgrade.
@@ -166,6 +176,8 @@ final class MixState: ObservableObject {
             pauseVisualsOnBattery: pauseVisualsOnBattery,
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
             launchAtLogin: launchAtLogin,
+            rainBlue: rainBlue,
+            frameRate: frameRate,
             openWindowAtLaunch: openWindowAtLaunch
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
@@ -193,6 +205,8 @@ final class MixState: ObservableObject {
         pauseVisualsOnBattery = stored.pauseVisualsOnBattery
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
+        rainBlue = stored.rainBlue ?? 0.85
+        frameRate = stored.frameRate ?? .thirty
         openWindowAtLaunch = stored.openWindowAtLaunch ?? true
     }
 

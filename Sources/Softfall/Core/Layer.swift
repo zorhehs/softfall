@@ -19,6 +19,29 @@ enum Layer: String, CaseIterable, Codable, Identifiable {
     var hasAudio: Bool { true }
 }
 
+/// How often the rain renderer is asked to draw.
+///
+/// This setting existed once before and was removed, because `CALayer` has no
+/// `preferredFrameRateRange` on macOS whatever the documentation implies. That
+/// is no longer the obstacle: the renderer now owns a `CADisplayLink`, and a
+/// display link genuinely can be asked for a rate.
+enum RainFrameRate: Int, Codable, CaseIterable, Identifiable {
+    case thirty = 30
+    case sixty = 60
+    /// Whatever the display can do, which on a ProMotion panel is 120.
+    case display = 0
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .thirty:  return "30 fps"
+        case .sixty:   return "60 fps"
+        case .display: return "Display"
+        }
+    }
+}
+
 /// What you choose. Three options, nothing else.
 enum Scene: String, CaseIterable, Codable, Identifiable {
     case rain

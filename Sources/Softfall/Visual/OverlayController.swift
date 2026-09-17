@@ -112,7 +112,7 @@ final class OverlayController: NSObject {
                     // keep falling for a moment after the rain is switched off.
                     if !entry.scene.wantsAnimation { entry.link.isPaused = true }
                 }
-                entry.link.start(in: view, fps: 60)
+                entry.link.start(in: view, rate: state?.frameRate ?? .thirty)
                 entry.link.isPaused = true
             }
             screens[id] = entry
@@ -159,9 +159,10 @@ final class OverlayController: NSObject {
             }
             screen.scene.update(state: state)
 
-            // Low Power Mode halves the refresh rate rather than stopping the
-            // picture. Anything that makes the app vanish gets it uninstalled.
-            screen.link.setFrameRate(state.powerSaving ? 30 : 60)
+            // Low Power Mode pins the rate to its floor rather than stopping
+            // the picture. Anything that makes the app vanish gets it
+            // uninstalled.
+            screen.link.setFrameRate(state.powerSaving ? .thirty : state.frameRate)
             screen.link.isPaused = !(visible && screen.scene.wantsAnimation)
 
             if visible {

@@ -194,6 +194,35 @@ struct MainWindowView: View {
                 trailing: "\(Int(state.opacity * 100))%"
             )
 
+            SliderRow(
+                title: "Rain colour",
+                symbol: "drop.fill",
+                range: 0...1,
+                value: $state.rainBlue,
+                trailing: "\(Int(state.rainBlue * 100))%"
+            )
+            .help("White at the left, cold blue at the right. How far you can go depends on the wallpaper behind it.")
+
+            HStack(spacing: 9) {
+                Image(systemName: "speedometer")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 15)
+                Text("Frame rate")
+                    .font(.system(size: 11.5))
+                    .frame(width: 72, alignment: .leading)
+                Picker("", selection: $state.frameRate) {
+                    ForEach(RainFrameRate.allCases) { rate in
+                        Text(rate.title).tag(rate)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 230)
+                Spacer(minLength: 0)
+            }
+            .help("Lower is cheaper. Thirty still reads as continuous motion.")
+
             Toggle("Calm mode", isOn: $state.calmMode)
                 .help("Fewer drops, slower fall, softer contrast.")
         }
