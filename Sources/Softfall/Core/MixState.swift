@@ -30,7 +30,9 @@ final class MixState: ObservableObject {
 
     // MARK: Scene
 
-    @Published var layers: [Layer: LayerSettings] = MixState.defaultLayers
+    @Published var scene: Scene = .rain
+    /// Kept per scene, so switching away and back restores what you had.
+    @Published var settings: [Scene: SceneSettings] = MixState.defaultSettings
     @Published var isPlaying: Bool = true
     @Published var masterVolume: Double = 0.7
 
@@ -38,25 +40,23 @@ final class MixState: ObservableObject {
 
     @Published var placement: OverlayPlacement = .aboveWindows
     @Published var allDisplays: Bool = true
-    /// Caps particle count and speed, and softens contrast. For when even
-    /// gentle motion is too much — and it is also the low-power path.
+    /// Fewer particles, slower movement, softer contrast.
     @Published var calmMode: Bool = false
     @Published var opacity: Double = 0.85
+    /// Asks Core Animation for a higher frame rate. Only has an effect on a
+    /// display that can actually show one, and costs more power.
+    @Published var highFrameRate: Bool = false
 
     // MARK: Behaviour
 
-    /// Off by default. Being unplugged is not a request for an invisible app,
-    /// and defaulting this on made Softfall look broken on any laptop that
-    /// happened not to be charging.
-    @Published var pauseVisualsOnBattery: Bool = false
     @Published var pauseVisualsWhenFullScreen: Bool = true
+    /// Off by default. Being unplugged is not a request for an invisible app.
+    @Published var pauseVisualsOnBattery: Bool = false
     @Published var launchAtLogin: Bool = false
 
-    /// Set when Low Power Mode is on. Thins the scene rather than hiding it,
-    /// so the app degrades instead of disappearing.
+    /// Set when Low Power Mode is on. Thins the scene rather than hiding it.
     @Published var powerSaving: Bool = false
-    /// Why the picture has stopped, when it has. Shown in the panel so that
-    /// "nothing on screen" is never a mystery.
+    /// Why the picture has stopped, when it has.
     @Published var visualNotice: String?
 
     // MARK: Sleep timer (not persisted — a timer should never outlive a launch)
@@ -66,14 +66,10 @@ final class MixState: ObservableObject {
 
     // MARK: Wiring
 
-    /// Called (on main) whenever anything changes, after the change lands.
     var onChange: (() -> Void)?
 
     private var cancellables = Set<AnyCancellable>()
-    // Bumped from v1: the battery default changed, and a saved `true` from an
-    // earlier run would otherwise keep overriding it. Settings are cheap to
-    // set again at this stage; a mystifying invisible app is not.
-    private static let storageKey = "softfall.state.v2"
+    private static let storageKey = "softfall.state.v3"
 
     init() {
         load()
@@ -92,72 +88,54 @@ final class MixState: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // MARK: Convenience
+    // MARK: Current scene
 
-    func settings(_ layer: Layer) -> LayerSettings {
-        layers[layer] ?? LayerSettings()
+    var current: SceneSettings {
+        settings[scene] ?? SceneSettings()
     }
 
-    func update(_ layer: Layer, _ transform: (inout LayerSettings) -> Void) {
-        var s = settings(layer)
+    func updateCurrent(_ transform: (inout SceneSettings) -> Void) {
+        var s = current
         transform(&s)
-        layers[layer] = s
+        settings[scene] = s
     }
 
-    /// Anything audible right now, accounting for master state and fade.
+    /// Audio gain for one engine layer, derived from the chosen scene.
+    /// A layer the current scene does not use is simply silent.
     func effectiveGain(_ layer: Layer) -> Double {
-        guard isPlaying, layer.hasAudio else { return 0 }
-        return settings(layer).audioGain * masterVolume * fadeMultiplier
+        guard isPlaying, current.sound, scene.layers.contains(layer) else { return 0 }
+        return current.level * scene.weight(for: layer) * masterVolume * fadeMultiplier
     }
 
-    /// Anything visible right now.
+    /// Particle density for one engine layer.
     func effectiveDensity(_ layer: Layer) -> Double {
-        guard isPlaying, layer.hasVisual else { return 0 }
-        var d = settings(layer).visualDensity
+        guard isPlaying, current.picture, scene.layers.contains(layer) else { return 0 }
+        var d = current.level * scene.weight(for: layer)
         if calmMode { d *= 0.45 }
         if powerSaving { d *= 0.5 }
         return d
     }
 
+    /// The level fed to a layer's synthesiser as a timbre control, independent
+    /// of how loud it is.
+    func level(_ layer: Layer) -> Double {
+        scene.layers.contains(layer) ? current.level : 0.5
+    }
+
     var anyVisualActive: Bool {
-        isPlaying && Layer.allCases.contains { $0.hasVisual && settings($0).visual && settings($0).level > 0.001 }
+        isPlaying && current.picture && current.level > 0.001
     }
 
-    var activeCount: Int {
-        Layer.allCases.filter { settings($0).isActive }.count
-    }
-
-    // MARK: Presets
-
-    func apply(_ preset: Preset) {
-        var next: [Layer: LayerSettings] = [:]
-        for layer in Layer.allCases {
-            next[layer] = preset.layers[layer] ?? LayerSettings(visual: false, sound: false, level: 0.5)
-        }
-        layers = next
+    func select(_ newScene: Scene) {
+        scene = newScene
         isPlaying = true
-    }
-
-    func matches(_ preset: Preset) -> Bool {
-        for layer in Layer.allCases {
-            let mine = settings(layer)
-            let theirs = preset.layers[layer] ?? LayerSettings(visual: false, sound: false, level: 0.5)
-            if mine.visual != theirs.visual || mine.sound != theirs.sound { return false }
-            if mine.isActive && abs(mine.level - theirs.level) > 0.02 { return false }
-        }
-        return true
-    }
-
-    func silenceAll() {
-        for layer in Layer.allCases {
-            update(layer) { $0.visual = false; $0.sound = false }
-        }
     }
 
     // MARK: Persistence
 
     private struct Stored: Codable {
-        var layers: [String: LayerSettings]
+        var scene: Scene
+        var settings: [String: SceneSettings]
         var isPlaying: Bool
         var masterVolume: Double
         var placement: OverlayPlacement
@@ -167,13 +145,16 @@ final class MixState: ObservableObject {
         var pauseVisualsOnBattery: Bool
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
+        // Optional so settings saved by an earlier build still decode.
+        var highFrameRate: Bool?
     }
 
     func save() {
-        var dict: [String: LayerSettings] = [:]
-        for (layer, settings) in layers { dict[layer.rawValue] = settings }
+        var dict: [String: SceneSettings] = [:]
+        for (key, value) in settings { dict[key.rawValue] = value }
         let stored = Stored(
-            layers: dict,
+            scene: scene,
+            settings: dict,
             isPlaying: isPlaying,
             masterVolume: masterVolume,
             placement: placement,
@@ -182,7 +163,8 @@ final class MixState: ObservableObject {
             opacity: opacity,
             pauseVisualsOnBattery: pauseVisualsOnBattery,
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            highFrameRate: highFrameRate
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
@@ -194,11 +176,12 @@ final class MixState: ObservableObject {
             let stored = try? JSONDecoder().decode(Stored.self, from: data)
         else { return }
 
-        var restored: [Layer: LayerSettings] = MixState.defaultLayers
-        for (key, value) in stored.layers {
-            if let layer = Layer(rawValue: key) { restored[layer] = value }
+        var restored = MixState.defaultSettings
+        for (key, value) in stored.settings {
+            if let s = Scene(rawValue: key) { restored[s] = value }
         }
-        layers = restored
+        settings = restored
+        scene = stored.scene
         isPlaying = stored.isPlaying
         masterVolume = stored.masterVolume
         placement = stored.placement
@@ -208,17 +191,14 @@ final class MixState: ObservableObject {
         pauseVisualsOnBattery = stored.pauseVisualsOnBattery
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
+        highFrameRate = stored.highFrameRate ?? false
     }
 
-    /// First launch lands on gentle rain — the thing almost everyone opens
-    /// this kind of app for — rather than an empty screen.
-    static var defaultLayers: [Layer: LayerSettings] {
-        var d: [Layer: LayerSettings] = [:]
-        for layer in Layer.allCases {
-            d[layer] = LayerSettings(visual: false, sound: false, level: 0.5)
-        }
-        d[.rain] = LayerSettings(visual: true, sound: true, level: 0.45)
-        d[.fog] = LayerSettings(visual: true, sound: false, level: 0.25)
-        return d
+    static var defaultSettings: [Scene: SceneSettings] {
+        [
+            .rain:     SceneSettings(picture: true, sound: true, level: 0.45),
+            .thunder:  SceneSettings(picture: true, sound: true, level: 0.55),
+            .campfire: SceneSettings(picture: true, sound: true, level: 0.55)
+        ]
     }
 }

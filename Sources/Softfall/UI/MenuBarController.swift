@@ -38,7 +38,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Keeps the menu bar glyph honest about whether anything is playing.
     func updateIcon() {
         guard let button = statusItem.button else { return }
-        let name = state.isPlaying && state.activeCount > 0 ? "cloud.rain" : "cloud"
+        let name = state.isPlaying && state.current.isActive ? state.scene.symbol : "cloud"
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "Softfall")
         image?.isTemplate = true
         button.image = image
@@ -78,11 +78,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         menu.addItem(.separator())
 
-        for preset in Preset.all {
-            let item = NSMenuItem(title: preset.title, action: #selector(choosePreset(_:)), keyEquivalent: "")
+        for scene in Scene.allCases {
+            let item = NSMenuItem(title: scene.title, action: #selector(chooseScene(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = preset.id
-            item.state = state.matches(preset) ? .on : .off
+            item.representedObject = scene.rawValue
+            item.state = state.scene == scene ? .on : .off
             menu.addItem(item)
         }
 
@@ -103,10 +103,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         state.isPlaying.toggle()
     }
 
-    @objc private func choosePreset(_ sender: NSMenuItem) {
+    @objc private func chooseScene(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,
-              let preset = Preset.all.first(where: { $0.id == id }) else { return }
-        state.apply(preset)
+              let scene = Scene(rawValue: id) else { return }
+        state.select(scene)
     }
 
     @objc private func quit() {

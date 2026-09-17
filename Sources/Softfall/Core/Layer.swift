@@ -1,135 +1,91 @@
 import Foundation
 
-/// One element of the scene. Every layer is uniform: it may draw something,
-/// it may make a sound, and a single "level" slider controls how much of it
-/// there is. That uniformity is what keeps the interface small no matter how
-/// many layers exist.
+/// What the renderer and the synthesiser actually produce.
+///
+/// Deliberately not the same list as `Scene`. Thunder is lightning and rumble
+/// *over* rain, so the Thunder scene drives two layers; keeping the two
+/// vocabularies separate means the rain code is written once and reused,
+/// instead of being duplicated inside a "thunder" case.
 enum Layer: String, CaseIterable, Codable, Identifiable {
     case rain
-    case snow
-    case wind
     case thunder
-    case fog
-    case fireflies
     case embers
-    case ocean
-    case stream
-    case drone
+
+    var id: String { rawValue }
+
+    /// Whether this layer draws anything on screen.
+    var hasVisual: Bool { true }
+    /// Whether this layer makes any sound.
+    var hasAudio: Bool { true }
+}
+
+/// What you choose. Three options, nothing else.
+enum Scene: String, CaseIterable, Codable, Identifiable {
+    case rain
+    case thunder
+    case campfire
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .rain:      return "Rain"
-        case .snow:      return "Snow"
-        case .wind:      return "Breeze"
-        case .thunder:   return "Thunder"
-        case .fog:       return "Fog"
-        case .fireflies: return "Fireflies"
-        case .embers:    return "Embers"
-        case .ocean:     return "Ocean"
-        case .stream:    return "Stream"
-        case .drone:     return "Deep Hum"
+        case .rain:     return "Rain"
+        case .thunder:  return "Thunder"
+        case .campfire: return "Campfire"
         }
     }
 
-    var subtitle: String {
+    var blurb: String {
         switch self {
-        case .rain:      return "Falling streaks and a steady hiss"
-        case .snow:      return "Drifting flakes, and the hush they bring"
-        case .wind:      return "Slow gusts that never repeat"
-        case .thunder:   return "Distant flashes, rumble following after"
-        case .fog:       return "A soft haze that dims the edges"
-        case .fireflies: return "Slow points of light, wandering"
-        case .embers:    return "Rising sparks and a fire's crackle"
-        case .ocean:     return "Swell and retreat"
-        case .stream:    return "Water over stones"
-        case .drone:     return "A low, level tone for deep focus"
+        case .rain:     return "Steady rain, and the sound of it."
+        case .thunder:  return "Rain with lightning, and rumble following after."
+        case .campfire: return "Embers lifting, wood cracking."
         }
     }
 
     var symbol: String {
         switch self {
-        case .rain:      return "cloud.rain.fill"
-        case .snow:      return "cloud.snow.fill"
-        case .wind:      return "wind"
-        case .thunder:   return "cloud.bolt.fill"
-        case .fog:       return "cloud.fog.fill"
-        case .fireflies: return "sparkles"
-        case .embers:    return "flame.fill"
-        case .ocean:     return "water.waves"
-        case .stream:    return "drop.fill"
-        case .drone:     return "waveform"
+        case .rain:     return "cloud.rain.fill"
+        case .thunder:  return "cloud.bolt.rain.fill"
+        case .campfire: return "flame.fill"
         }
     }
 
-    /// Whether this layer draws anything on screen.
-    var hasVisual: Bool {
-        switch self {
-        case .ocean, .stream, .drone: return false
-        default: return true
-        }
-    }
-
-    /// Whether this layer makes any sound.
-    var hasAudio: Bool {
-        switch self {
-        case .fog, .fireflies: return false
-        default: return true
-        }
-    }
-
-    var group: LayerGroup {
-        switch self {
-        case .rain, .snow, .wind, .thunder, .fog: return .sky
-        case .fireflies, .embers:                 return .light
-        case .ocean, .stream, .drone:             return .water
-        }
-    }
-}
-
-enum LayerGroup: String, CaseIterable, Identifiable {
-    case sky
-    case light
-    case water
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .sky:   return "Sky"
-        case .light: return "Light"
-        case .water: return "Water & Air"
-        }
-    }
-
+    /// The layers this scene switches on.
     var layers: [Layer] {
-        Layer.allCases.filter { $0.group == self }
+        switch self {
+        case .rain:     return [.rain]
+        case .thunder:  return [.rain, .thunder]
+        case .campfire: return [.embers]
+        }
+    }
+
+    /// Some layers should sit under the one you actually chose rather than
+    /// matching it. Rain under a thunderstorm is the weather, not the event.
+    func weight(for layer: Layer) -> Double {
+        switch (self, layer) {
+        case (.thunder, .thunder): return 0.55
+        default:                   return 1.0
+        }
     }
 }
 
-/// Per-layer user settings.
+/// How much of the chosen scene there is, and whether you want to see it,
+/// hear it, or both.
 ///
-/// `visual` and `sound` are deliberately independent: you can have rain on
-/// screen in silence, or rain in your ears with a still desktop. Muting the
-/// sound never hides the picture and vice versa.
-struct LayerSettings: Codable, Equatable {
-    var visual: Bool
+/// Picture and sound stay independent: rain on screen in silence, or rain in
+/// your ears with a still desktop, are both things people want.
+struct SceneSettings: Codable, Equatable {
+    var picture: Bool
     var sound: Bool
-    /// 0...1 — how much of this layer there is. Drives particle density and
-    /// audio gain together, so one slider means one idea.
+    /// 0...1 — drives particle density and audio character together.
     var level: Double
 
-    init(visual: Bool = false, sound: Bool = false, level: Double = 0.5) {
-        self.visual = visual
+    init(picture: Bool = true, sound: Bool = true, level: Double = 0.5) {
+        self.picture = picture
         self.sound = sound
         self.level = level
     }
 
-    /// Effective audio gain, 0 when muted.
-    var audioGain: Double { sound ? level : 0 }
-    /// Effective visual density, 0 when hidden.
-    var visualDensity: Double { visual ? level : 0 }
-
-    var isActive: Bool { (visual || sound) && level > 0.001 }
+    var isActive: Bool { (picture || sound) && level > 0.001 }
 }

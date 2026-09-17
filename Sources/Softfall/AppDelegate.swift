@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var power: PowerMonitor!
     private var menuBar: MenuBarController!
     private var tickTimer: Timer?
-    private var lastThunderSettings: LayerSettings?
+    private var lastSceneKey: String?
     private var lastSuspend: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -58,11 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyPowerPolicy()
         syncLoginItem()
 
-        // Restart the storm schedule only when thunder itself changed, so
-        // adjusting an unrelated slider never resets the timing.
-        let thunder = state.settings(.thunder)
-        if thunder != lastThunderSettings {
-            lastThunderSettings = thunder
+        // Restart the storm schedule only when something that affects it
+        // changed, so adjusting an unrelated setting never resets the timing.
+        let key = "\(state.scene.rawValue)|\(state.current.level)|\(state.current.sound)|\(state.current.picture)"
+        if key != lastSceneKey {
+            lastSceneKey = key
             lightning.settingsChanged()
         }
     }
