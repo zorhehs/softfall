@@ -68,6 +68,9 @@ struct ControlPanelView: View {
     }
 
     private var statusLine: String {
+        // Highest priority: if the picture has stopped, say so. An ambient app
+        // showing nothing with no explanation reads as broken.
+        if let notice = state.visualNotice { return notice }
         if let text = sleepText { return text }
         if !state.isPlaying { return "Paused" }
         let count = state.activeCount

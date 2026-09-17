@@ -52,6 +52,13 @@ final class MixState: ObservableObject {
     @Published var pauseVisualsWhenFullScreen: Bool = true
     @Published var launchAtLogin: Bool = false
 
+    /// Set when Low Power Mode is on. Thins the scene rather than hiding it,
+    /// so the app degrades instead of disappearing.
+    @Published var powerSaving: Bool = false
+    /// Why the picture has stopped, when it has. Shown in the panel so that
+    /// "nothing on screen" is never a mystery.
+    @Published var visualNotice: String?
+
     // MARK: Sleep timer (not persisted — a timer should never outlive a launch)
 
     @Published var sleepTimerEndsAt: Date?
