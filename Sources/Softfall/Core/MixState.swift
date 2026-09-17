@@ -50,6 +50,9 @@ final class MixState: ObservableObject {
     /// Off by default. Being unplugged is not a request for an invisible app.
     @Published var pauseVisualsOnBattery: Bool = false
     @Published var launchAtLogin: Bool = false
+    /// Whether the window opens on launch. Worth its own switch: an app that
+    /// opens at login should not throw a window at you every morning.
+    @Published var openWindowAtLaunch: Bool = true
 
     /// Set when Low Power Mode is on. Thins the scene rather than hiding it.
     @Published var powerSaving: Bool = false
@@ -142,6 +145,10 @@ final class MixState: ObservableObject {
         var pauseVisualsOnBattery: Bool
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
+        /// Optional on purpose. A non-optional field added to this struct makes
+        /// every previously saved blob fail to decode, which silently resets
+        /// all of someone's settings on upgrade.
+        var openWindowAtLaunch: Bool?
     }
 
     func save() {
@@ -158,7 +165,8 @@ final class MixState: ObservableObject {
             opacity: opacity,
             pauseVisualsOnBattery: pauseVisualsOnBattery,
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            openWindowAtLaunch: openWindowAtLaunch
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
@@ -185,6 +193,7 @@ final class MixState: ObservableObject {
         pauseVisualsOnBattery = stored.pauseVisualsOnBattery
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
+        openWindowAtLaunch = stored.openWindowAtLaunch ?? true
     }
 
     static var defaultSettings: [Scene: SceneSettings] {

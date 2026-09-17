@@ -1,25 +1,24 @@
 import AppKit
-import SwiftUI
 
-/// The app lives entirely in the menu bar — no Dock icon, no window in your
-/// way. Clicking the icon opens the panel; clicking anywhere else closes it.
-final class MenuBarController: NSObject, NSPopoverDelegate {
+/// The menu bar icon, which survives the move to a windowed app.
+///
+/// It is no longer where the controls live — that is the window's job now — so
+/// it has shed its popover and kept the two things a status item is genuinely
+/// better at than a window: telling you at a glance whether anything is
+/// playing, and letting you change scene without raising anything.
+final class MenuBarController: NSObject {
 
     private let statusItem: NSStatusItem
-    private let popover = NSPopover()
     private let state: MixState
-    private var eventMonitor: Any?
+    private let onOpenWindow: () -> Void
+    private let onQuit: () -> Void
 
-    init(state: MixState, onQuit: @escaping () -> Void) {
+    init(state: MixState, onOpenWindow: @escaping () -> Void, onQuit: @escaping () -> Void) {
         self.state = state
+        self.onOpenWindow = onOpenWindow
+        self.onQuit = onQuit
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
-
-        let panel = ControlPanelView(state: state, onQuit: onQuit)
-        popover.contentViewController = NSHostingController(rootView: panel)
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
 
         if let button = statusItem.button {
             button.target = self
@@ -29,10 +28,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         }
 
         updateIcon()
-    }
-
-    deinit {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
     }
 
     /// Keeps the menu bar glyph honest about whether anything is playing.
@@ -51,22 +46,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
             showContextMenu()
         } else {
-            togglePopover()
+            onOpenWindow()
         }
-    }
-
-    private func togglePopover() {
-        if popover.isShown {
-            popover.performClose(nil)
-            return
-        }
-        guard let button = statusItem.button else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     private func showContextMenu() {
         let menu = NSMenu()
+
+        let open = NSMenuItem(title: "Open Softfall", action: #selector(openWindow), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+
+        menu.addItem(.separator())
 
         let toggle = NSMenuItem(
             title: state.isPlaying ? "Pause" : "Play",
@@ -99,6 +90,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         statusItem.menu = nil
     }
 
+    @objc private func openWindow() {
+        onOpenWindow()
+    }
+
     @objc private func togglePlaying() {
         state.isPlaying.toggle()
     }
@@ -110,10 +105,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func quit() {
-        NSApp.terminate(nil)
-    }
-
-    func closePanel() {
-        if popover.isShown { popover.performClose(nil) }
+        onQuit()
     }
 }

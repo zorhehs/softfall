@@ -6,9 +6,10 @@
 
 **Weather for your desktop, and the sound that goes with it.**
 
-A small menu bar app for macOS. Rain falls over your screen while you work,
-clicks pass straight through, and every layer's picture and sound switch on
-and off independently.
+A small macOS app. Rain falls over your screen while you work, clicks pass
+straight through, and every layer's picture and sound switch on and off
+independently. There is a window when you want to change something, and a menu
+bar icon for when you do not.
 
 [![Build](https://github.com/zorhehs/softfall/actions/workflows/build.yml/badge.svg)](https://github.com/zorhehs/softfall/actions/workflows/build.yml)
 &nbsp;·&nbsp; macOS 14+ &nbsp;·&nbsp; Universal (Apple silicon + Intel) &nbsp;·&nbsp; MIT
@@ -27,7 +28,11 @@ brew install --cask softfall
 Or grab the `.zip` from [Releases](https://github.com/zorhehs/softfall/releases),
 unzip it, and drag `Softfall.app` to `/Applications`.
 
-Softfall has no Dock icon. After installing, look for the cloud in your menu bar.
+Softfall opens its window on first launch. After that the cloud in your menu
+bar is the quickest way back to it — click it to show or hide the window,
+right-click for pause and scene switching without raising anything. The window
+can be closed without stopping the weather, and "Open this window at launch"
+turns the opening off if you would rather start quietly.
 
 ## What's in it
 
@@ -114,7 +119,7 @@ Sources/Softfall
 ├── Audio/     DSP primitives, the synthesis voices, the AVAudioEngine host
 ├── Visual/    Click-through windows, the rain renderer, lightning
 ├── Core/      Layer model, saved state, presets, power awareness
-└── UI/        Menu bar item and the SwiftUI control panel
+└── UI/        The window, the app menu, and the menu bar item
 ```
 
 ## A note on Gatekeeper

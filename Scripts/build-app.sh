@@ -70,8 +70,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <!-- Menu bar only: no Dock icon, no entry in the app switcher. -->
-    <key>LSUIElement</key><true/>
+    <!-- No LSUIElement on purpose. Softfall is a regular app: Dock icon, window
+         and menu bar, plus a status item. Adding LSUIElement back here would
+         fight main.swift's .regular activation policy. -->
     <key>NSHumanReadableCopyright</key><string>MIT licensed</string>
 </dict>
 </plist>

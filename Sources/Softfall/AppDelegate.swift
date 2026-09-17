@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lightning: LightningDirector!
     private var power: PowerMonitor!
     private var menuBar: MenuBarController!
+    private var window: MainWindowController!
+    private var appMenu: AppMenuController!
     private var tickTimer: Timer?
     private var lastSceneKey: String?
     private var lastSuspend: Bool?
@@ -23,9 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         power = PowerMonitor()
         power.onChange = { [weak self] in self?.applyPowerPolicy() }
 
-        menuBar = MenuBarController(state: state) {
-            NSApp.terminate(nil)
-        }
+        window = MainWindowController(state: state)
+
+        // The menu bar item no longer owns a popover — it opens the window, or
+        // offers the quick menu on a right-click.
+        menuBar = MenuBarController(
+            state: state,
+            onOpenWindow: { [weak self] in self?.window.toggle() },
+            onQuit: { NSApp.terminate(nil) }
+        )
+
+        appMenu = AppMenuController(state: state) { [weak self] in self?.window.show() }
+        appMenu.install()
 
         state.onChange = { [weak self] in self?.stateChanged() }
 
@@ -38,6 +49,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applyPowerPolicy()
         stateChanged()
+
+        if state.openWindowAtLaunch {
+            window.show()
+        }
+    }
+
+    /// Clicking the Dock icon of a running app sends this. Without it the click
+    /// does nothing at all once the window has been closed, which looks broken.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        window?.show()
+        return true
+    }
+
+    /// Closing the window puts Softfall back to being just a menu bar icon. It
+    /// is an ambient app; the weather should not stop because you tidied up.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationWillTerminate(_ notification: Notification) {

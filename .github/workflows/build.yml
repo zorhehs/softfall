@@ -39,8 +39,16 @@ jobs:
           lipo -info "$APP/Contents/MacOS/Softfall"
           echo "--- signature ---"
           codesign -dv "$APP" 2>&1 | head -n 5
-          echo "--- LSUIElement (must be 1 for a menu bar app) ---"
-          /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist"
+          echo "--- activation policy ---"
+          # Softfall is a regular app now. LSUIElement would make it launch as
+          # an accessory and fight the .regular policy set in main.swift.
+          if /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist" >/dev/null 2>&1; then
+            echo "error: LSUIElement is present — the app would launch without a Dock icon" >&2
+            exit 1
+          fi
+          echo "LSUIElement absent, as a windowed app needs"
+          echo "--- minimum system version ---"
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
 
       - name: Upload the build
         uses: actions/upload-artifact@v4
