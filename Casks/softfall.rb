@@ -7,7 +7,7 @@ cask "softfall" do
   desc "Ambient weather overlay for macOS with fully synthesized sound"
   homepage "https://github.com/zorhehs/softfall"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: ">= :sonoma"
 
   app "Softfall.app"
 

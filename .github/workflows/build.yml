@@ -2,7 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [main, develop]
+    # Feature branches build too: there is no Xcode on the machine this is
+    # written on, so CI is the only compiler.
+    branches: [main, develop, 'feature/**']
   pull_request:
     branches: [main, develop]
   workflow_dispatch:

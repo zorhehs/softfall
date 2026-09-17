@@ -3,9 +3,18 @@ import AppKit
 /// Owns one overlay window per display and keeps them in step with the mix.
 final class OverlayController: NSObject {
 
-    private struct Screen {
+    /// A class rather than a struct: each display owns a display link whose
+    /// paused state is flipped constantly, and copying that in and out of a
+    /// dictionary every time would be busywork.
+    private final class Screen {
         let window: OverlayWindow
         let scene: SceneLayers
+        let link = DisplayLinkDriver()
+
+        init(window: OverlayWindow, scene: SceneLayers) {
+            self.window = window
+            self.scene = scene
+        }
     }
 
     private var screens: [CGDirectDisplayID: Screen] = [:]
@@ -69,10 +78,11 @@ final class OverlayController: NSObject {
             if let existing = screens[id] {
                 // A display can be rearranged or change resolution while we
                 // are running; move and re-lay-out rather than recreating.
-                if existing.window.frame != screen.frame {
+                if existing.window.frame != screen.frame
+                    || existing.window.backingScaleFactor != screen.backingScaleFactor {
                     existing.window.setFrame(screen.frame, display: true)
                     existing.window.contentView?.frame = CGRect(origin: .zero, size: screen.frame.size)
-                    existing.scene.resize(to: screen.frame.size)
+                    existing.scene.resize(to: screen.frame.size, scale: screen.backingScaleFactor)
                     attach(existing.scene, to: existing.window)
                 }
                 continue
@@ -86,14 +96,31 @@ final class OverlayController: NSObject {
                 )
             }
             let scene = SceneLayers()
-            scene.build(size: screen.frame.size)
+            scene.build(size: screen.frame.size, scale: screen.backingScaleFactor)
             attach(scene, to: window)
             window.orderFrontRegardless()
-            screens[id] = Screen(window: window, scene: scene)
+
+            let entry = Screen(window: window, scene: scene)
+            // The link is created from the window's own view so it ticks in
+            // step with the display that window is on, and keeps up if that
+            // display is a 120 Hz one.
+            if let view = window.contentView {
+                entry.link.onFrame = { [weak entry] dt in
+                    guard let entry else { return }
+                    entry.scene.advance(dt: dt)
+                    // The scene decides when it is finished — the last drops
+                    // keep falling for a moment after the rain is switched off.
+                    if !entry.scene.wantsAnimation { entry.link.isPaused = true }
+                }
+                entry.link.start(in: view, fps: 60)
+                entry.link.isPaused = true
+            }
+            screens[id] = entry
         }
 
         // Tear down windows for displays that went away or were deselected.
         for (id, screen) in screens where !wantedIDs.contains(id) {
+            screen.link.stop()
             screen.window.orderOut(nil)
             screen.window.close()
             screens.removeValue(forKey: id)
@@ -132,6 +159,11 @@ final class OverlayController: NSObject {
             }
             screen.scene.update(state: state)
 
+            // Low Power Mode halves the refresh rate rather than stopping the
+            // picture. Anything that makes the app vanish gets it uninstalled.
+            screen.link.setFrameRate(state.powerSaving ? 30 : 60)
+            screen.link.isPaused = !(visible && screen.scene.wantsAnimation)
+
             if visible {
                 if !screen.window.isVisible { screen.window.orderFrontRegardless() }
             } else if screen.window.isVisible {
@@ -159,6 +191,7 @@ final class OverlayController: NSObject {
 
     func tearDown() {
         for (_, screen) in screens {
+            screen.link.stop()
             screen.window.orderOut(nil)
             screen.window.close()
         }

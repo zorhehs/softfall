@@ -11,7 +11,7 @@ clicks pass straight through, and every layer's picture and sound switch on
 and off independently.
 
 [![Build](https://github.com/zorhehs/softfall/actions/workflows/build.yml/badge.svg)](https://github.com/zorhehs/softfall/actions/workflows/build.yml)
-&nbsp;·&nbsp; macOS 13+ &nbsp;·&nbsp; Universal (Apple silicon + Intel) &nbsp;·&nbsp; MIT
+&nbsp;·&nbsp; macOS 14+ &nbsp;·&nbsp; Universal (Apple silicon + Intel) &nbsp;·&nbsp; MIT
 
 </div>
 
@@ -89,8 +89,12 @@ An ambient app earns its place by not competing for attention.
 - **It won't show up in screen shares.** The overlay excludes itself from
   screen recording, so your rain stays yours.
 
-Particles are drawn by Core Animation on the GPU, so leaving it running all day
-is a reasonable thing to do.
+Rain is drawn by hand — a pre-rendered streak sprite blitted once per drop,
+rotated to face the direction it is actually travelling, stepped by a display
+link. That is why wind bends the rain instead of sliding it sideways. Embers
+are left to a Core Animation emitter, which is all a round glow needs. Both
+stop entirely when the display sleeps, the screen locks, or nothing is on
+screen.
 
 ## Build it yourself
 
@@ -108,7 +112,7 @@ way on a laptop and on CI.
 ```
 Sources/Softfall
 ├── Audio/     DSP primitives, the synthesis voices, the AVAudioEngine host
-├── Visual/    Click-through windows, Core Animation emitters, lightning
+├── Visual/    Click-through windows, the rain renderer, lightning
 ├── Core/      Layer model, saved state, presets, power awareness
 └── UI/        Menu bar item and the SwiftUI control panel
 ```

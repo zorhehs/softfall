@@ -1,42 +1,43 @@
 import AppKit
 import QuartzCore
 
-/// Builds and drives the Core Animation particle layers.
+/// Builds and drives everything drawn on one display.
+///
+/// Rain is a hand-drawn layer (`RainLayer`) stepped by a display link. Embers
+/// stay on `CAEmitterLayer`: an ember is a round glow with no direction of
+/// travel to face, so none of the reasons rain had to leave the emitter apply
+/// to it, and an emitter animates itself for free.
 ///
 /// Two things make rain read over an arbitrary desktop wallpaper rather than
 /// dissolving into it: a faint atmosphere wash for it to be bright against,
 /// and depth bands — far drops small, slow and faint, near ones long, fast
-/// and nearly opaque. Scaling one texture cannot do the second, because scale
-/// stretches width and length together and a "near" drop just comes out fat.
+/// and nearly opaque.
 final class SceneLayers {
 
     let root = CALayer()
     private let atmosphere = CAGradientLayer()
+    private let rain = RainLayer()
+    private let embers = CAEmitterLayer()
     private let flash = CALayer()
-    private var emitters: [Layer: CAEmitterLayer] = [:]
-    private var bands: [Layer: [Band]] = [:]
     private var size: CGSize = .zero
-    private var lastDensities: [Layer: Double] = [:]
+    private var scale: CGFloat = 2
+    private var embersWereOff = true
 
     /// Overall drop opacity, and how blue they are. Both were dialled in
-    /// against a real desktop rather than guessed.
+    /// against a real desktop rather than guessed — in the rain lab, over a
+    /// light desktop, a dark one and a photo wallpaper in turn.
     private static let dropOpacity: CGFloat = 0.55
-
-    private struct Band {
-        let name: String
-        let share: Float
-    }
+    private static let dropBlue: CGFloat = 0.70
 
     // MARK: Build
 
-    func build(size: CGSize) {
+    func build(size: CGSize, scale: CGFloat) {
         self.size = size
+        self.scale = scale
         root.frame = CGRect(origin: .zero, size: size)
         root.masksToBounds = true
         root.sublayers?.forEach { $0.removeFromSuperlayer() }
-        emitters.removeAll()
-        bands.removeAll()
-        lastDensities.removeAll()
+        embersWereOff = true
 
         atmosphere.frame = CGRect(origin: .zero, size: size)
         atmosphere.colors = [
@@ -50,11 +51,12 @@ final class SceneLayers {
         atmosphere.opacity = 0
         root.addSublayer(atmosphere)
 
-        for layer in [Layer.rain, .embers] {
-            let emitter = makeEmitter(for: layer, size: size)
-            emitters[layer] = emitter
-            root.addSublayer(emitter)
-        }
+        rain.configure(size: size, scale: scale)
+        rain.isHidden = true
+        root.addSublayer(rain)
+
+        buildEmbers(size: size)
+        root.addSublayer(embers)
 
         flash.frame = CGRect(origin: .zero, size: size)
         flash.backgroundColor = NSColor.white.cgColor
@@ -63,99 +65,34 @@ final class SceneLayers {
         root.addSublayer(flash)
     }
 
-    // MARK: Emitter construction
+    private func buildEmbers(size: CGSize) {
+        embers.frame = CGRect(origin: .zero, size: size)
+        embers.renderMode = .additive
+        embers.isHidden = true
+        embers.emitterShape = .line
+        embers.emitterPosition = CGPoint(x: size.width / 2, y: -20)
+        embers.emitterSize = CGSize(width: size.width * 0.9, height: 1)
 
-    private func makeEmitter(for layer: Layer, size: CGSize) -> CAEmitterLayer {
-        let emitter = CAEmitterLayer()
-        emitter.frame = CGRect(origin: .zero, size: size)
-        emitter.renderMode = (layer == .embers) ? .additive : .unordered
-        emitter.isHidden = true
-
-        let built = makeCells(for: layer, size: size)
-        // A closure rather than a key path: Swift has no key paths into tuples.
-        emitter.emitterCells = built.map { $0.cell }
-        bands[layer] = built.map { Band(name: $0.cell.name ?? "", share: $0.share) }
-
-        switch layer {
-        case .rain:
-            emitter.emitterShape = .line
-            emitter.emitterPosition = CGPoint(x: size.width / 2, y: size.height + 90)
-            emitter.emitterSize = CGSize(width: size.width * 1.7, height: 1)
-        case .embers:
-            emitter.emitterShape = .line
-            emitter.emitterPosition = CGPoint(x: size.width / 2, y: -20)
-            emitter.emitterSize = CGSize(width: size.width * 0.9, height: 1)
-        case .thunder:
-            break
-        }
-
-        return emitter
-    }
-
-    private func makeCells(for layer: Layer, size: CGSize) -> [(cell: CAEmitterCell, share: Float)] {
-        let height = Float(size.height)
-
-        switch layer {
-        case .rain:
-            return [
-                (rainCell(name: "rain-far", texture: ParticleTextures.raindropFar,
-                          velocity: 620, spread: 170, scale: 0.55, alpha: 0.44,
-                          height: height, crossSpeed: 500), 0.55),
-                (rainCell(name: "rain-mid", texture: ParticleTextures.raindropMid,
-                          velocity: 1020, spread: 260, scale: 0.80, alpha: 0.72,
-                          height: height, crossSpeed: 880), 0.30),
-                (rainCell(name: "rain-near", texture: ParticleTextures.raindropNear,
-                          velocity: 1560, spread: 380, scale: 1.05, alpha: 1.00,
-                          height: height, crossSpeed: 1350), 0.15)
-            ]
-
-        case .embers:
-            let cell = CAEmitterCell()
-            cell.name = "embers"
-            cell.birthRate = 0
-            cell.contents = ParticleTextures.ember
-            cell.velocity = 95
-            cell.velocityRange = 55
-            cell.emissionLongitude = .pi / 2
-            cell.emissionRange = 0.5
-            cell.yAcceleration = 26
-            cell.xAcceleration = 8
-            cell.lifetime = 7
-            cell.lifetimeRange = 3
-            cell.scale = 0.42
-            cell.scaleRange = 0.3
-            cell.scaleSpeed = -0.035
-            cell.alphaSpeed = -0.16
-            cell.spin = 0.6
-            cell.spinRange = 1.4
-            cell.color = NSColor(calibratedRed: 1.0, green: 0.60, blue: 0.24, alpha: 0.95).cgColor
-            return [(cell, 1.0)]
-
-        case .thunder:
-            // Lightning is a full-screen flash, not a particle system.
-            return []
-        }
-    }
-
-    private func rainCell(name: String, texture: CGImage?, velocity: CGFloat, spread: CGFloat,
-                          scale: CGFloat, alpha: CGFloat, height: Float, crossSpeed: Float) -> CAEmitterCell {
         let cell = CAEmitterCell()
-        cell.name = name
+        cell.name = "embers"
         cell.birthRate = 0
-        cell.contents = texture
-        cell.velocity = velocity
-        cell.velocityRange = spread
-        cell.emissionLongitude = -.pi / 2
-        cell.emissionRange = 0.035
-        cell.yAcceleration = -220
-        cell.lifetime = height / crossSpeed + 0.7
-        cell.scale = scale
-        cell.scaleRange = scale * 0.32
-        // Kept narrow deliberately. A wide alpha range pushes half the drops
-        // down towards invisible, which reads as the rain washing out.
-        cell.alphaRange = 0.14
-        cell.color = NSColor(calibratedWhite: 1.0, alpha: alpha * Self.dropOpacity).cgColor
-        return cell
+        cell.contents = ParticleTextures.ember
+        cell.velocity = 95
+        cell.velocityRange = 55
+        cell.emissionLongitude = .pi / 2
+        cell.emissionRange = 0.5
+        cell.yAcceleration = 26
+        cell.xAcceleration = 8
+        cell.lifetime = 7
+        cell.lifetimeRange = 3
+        cell.scale = 0.42
+        cell.scaleRange = 0.3
+        cell.scaleSpeed = -0.035
+        cell.alphaSpeed = -0.16
+        cell.spin = 0.6
+        cell.spinRange = 1.4
+        cell.color = NSColor(calibratedRed: 1.0, green: 0.60, blue: 0.24, alpha: 0.95).cgColor
+        embers.emitterCells = [cell]
     }
 
     // MARK: Drive
@@ -164,63 +101,46 @@ final class SceneLayers {
     /// another. Rain that always falls at the same angle looks printed on; a
     /// wind slider would be one more thing to fiddle with, so it drifts by
     /// itself instead.
-    private func autoWind() -> Float {
+    ///
+    /// This is now sampled every frame rather than only when a setting changes,
+    /// so the angle actually moves while you watch it.
+    private func autoWind() -> CGFloat {
         let t = CACurrentMediaTime()
         let a = sin(t * 0.037)
         let b = sin(t * 0.0113 + 1.7)
-        return Float((a * 0.62 + b * 0.38) * 0.34)
+        return CGFloat((a * 0.62 + b * 0.38) * 0.34)
+    }
+
+    /// Called from the display link. Allocation-free except for the drop
+    /// array's own growth, which settles within a second of a level change.
+    func advance(dt: CGFloat) {
+        guard !rain.isHidden else { return }
+        rain.params.wind = autoWind()
+        rain.advance(dt: dt)
+    }
+
+    /// Whether the display link still has anything to draw. Splashes outlive
+    /// the drop that made them, so rain that has just been switched off is
+    /// owed a few more frames.
+    var wantsAnimation: Bool {
+        !rain.isHidden
     }
 
     func update(state: MixState) {
         guard size != .zero else { return }
 
-        let areaScale = Float(max(size.width / 1920.0, 0.6))
-        let drift = autoWind()
+        let rainDensity = CGFloat(state.effectiveDensity(.rain))
+        rain.params.intensity = rainDensity
+        rain.params.dropOpacity = Self.dropOpacity
+        rain.params.blue = Self.dropBlue
+        // Calm mode is meant to be gentler, not merely thinner: slower drops
+        // covering less ground per frame are what reads as calm.
+        rain.params.speed = state.calmMode ? 0.75 : 1.0
+        // Switching rain off never hides the layer here: the renderer keeps
+        // drawing until the last drop has landed, then hides itself.
+        if rainDensity > 0.0001 { rain.isHidden = false }
 
-        for (layer, emitter) in emitters {
-            guard let layerBands = bands[layer], !layerBands.isEmpty else { continue }
-
-            let density = state.effectiveDensity(layer)
-            let total = birthRate(for: layer, density: density) * areaScale
-            let wasOff = (lastDensities[layer] ?? 0) <= 0.0001
-            lastDensities[layer] = density
-
-            if total <= 0 {
-                for band in layerBands {
-                    emitter.setValue(0, forKeyPath: "emitterCells.\(band.name).birthRate")
-                }
-                // Only on the transition to off, so an already-idle layer does
-                // not queue a block every time it is visited.
-                if !wasOff {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak emitter] in
-                        guard let e = emitter, let first = layerBands.first else { return }
-                        let current = e.value(forKeyPath: "emitterCells.\(first.name).birthRate") as? Float ?? 0
-                        if current <= 0 { e.isHidden = true }
-                    }
-                }
-                continue
-            }
-
-            if emitter.isHidden || wasOff {
-                emitter.isHidden = false
-                // Pre-roll so the scene arrives already full, rather than
-                // filling in from the top edge over several seconds.
-                emitter.beginTime = CACurrentMediaTime() - Double(preroll(for: layer))
-            }
-
-            for band in layerBands {
-                emitter.setValue(total * band.share, forKeyPath: "emitterCells.\(band.name).birthRate")
-            }
-
-            if layer == .rain {
-                for band in layerBands {
-                    emitter.setValue(-Float.pi / 2 + drift * 0.30,
-                                     forKeyPath: "emitterCells.\(band.name).emissionLongitude")
-                    emitter.setValue(drift * 240,
-                                     forKeyPath: "emitterCells.\(band.name).xAcceleration")
-                }
-            }
-        }
+        updateEmbers(state: state)
 
         // The wash follows whatever is on screen, weighted: rain wants more of
         // it than a campfire does. Capped low enough to read as an overcast
@@ -236,21 +156,34 @@ final class SceneLayers {
         CATransaction.commit()
     }
 
-    private func birthRate(for layer: Layer, density: Double) -> Float {
-        guard density > 0.0001 else { return 0 }
-        switch layer {
-        case .rain:    return Float(density * density * 900 + density * 80)
-        case .embers:  return Float(density * 85)
-        case .thunder: return 0
-        }
-    }
+    private func updateEmbers(state: MixState) {
+        let density = state.effectiveDensity(.embers)
+        let areaScale = Float(max(size.width / 1920.0, 0.6))
+        let rate = Float(density * 85) * areaScale
 
-    private func preroll(for layer: Layer) -> Float {
-        switch layer {
-        case .rain:    return 2
-        case .embers:  return 4
-        case .thunder: return 0
+        guard rate > 0 else {
+            embers.setValue(0, forKeyPath: "emitterCells.embers.birthRate")
+            // Only on the transition to off, so an already-idle emitter does
+            // not queue a block every time it is visited.
+            if !embersWereOff {
+                embersWereOff = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak embers] in
+                    guard let embers else { return }
+                    let current = embers.value(forKeyPath: "emitterCells.embers.birthRate") as? Float ?? 0
+                    if current <= 0 { embers.isHidden = true }
+                }
+            }
+            return
         }
+
+        if embers.isHidden || embersWereOff {
+            embers.isHidden = false
+            // Pre-roll so the scene arrives already full, rather than filling
+            // in from the bottom edge over several seconds.
+            embers.beginTime = CACurrentMediaTime() - 4
+        }
+        embersWereOff = false
+        embers.setValue(rate, forKeyPath: "emitterCells.embers.birthRate")
     }
 
     // MARK: Lightning
@@ -283,8 +216,8 @@ final class SceneLayers {
         flash.add(animation, forKey: "flash")
     }
 
-    func resize(to newSize: CGSize) {
-        guard newSize != size else { return }
-        build(size: newSize)
+    func resize(to newSize: CGSize, scale newScale: CGFloat) {
+        guard newSize != size || newScale != scale else { return }
+        build(size: newSize, scale: newScale)
     }
 }
