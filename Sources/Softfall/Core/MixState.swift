@@ -43,9 +43,6 @@ final class MixState: ObservableObject {
     /// Fewer particles, slower movement, softer contrast.
     @Published var calmMode: Bool = false
     @Published var opacity: Double = 0.85
-    /// Asks Core Animation for a higher frame rate. Only has an effect on a
-    /// display that can actually show one, and costs more power.
-    @Published var highFrameRate: Bool = false
 
     // MARK: Behaviour
 
@@ -145,8 +142,6 @@ final class MixState: ObservableObject {
         var pauseVisualsOnBattery: Bool
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
-        // Optional so settings saved by an earlier build still decode.
-        var highFrameRate: Bool?
     }
 
     func save() {
@@ -163,8 +158,7 @@ final class MixState: ObservableObject {
             opacity: opacity,
             pauseVisualsOnBattery: pauseVisualsOnBattery,
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
-            launchAtLogin: launchAtLogin,
-            highFrameRate: highFrameRate
+            launchAtLogin: launchAtLogin
         )
         guard let data = try? JSONEncoder().encode(stored) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
@@ -191,7 +185,6 @@ final class MixState: ObservableObject {
         pauseVisualsOnBattery = stored.pauseVisualsOnBattery
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
-        highFrameRate = stored.highFrameRate ?? false
     }
 
     static var defaultSettings: [Scene: SceneSettings] {

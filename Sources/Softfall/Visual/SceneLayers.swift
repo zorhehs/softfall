@@ -171,21 +171,8 @@ final class SceneLayers {
         return Float((a * 0.62 + b * 0.38) * 0.34)
     }
 
-    /// Core Animation drives the emitter itself, so the app cannot set a
-    /// frame rate directly — it can only state a preference and let the
-    /// compositor decide. On a display locked to 60 Hz this changes nothing.
-    private func applyFrameRate(_ high: Bool, to layer: CALayer) {
-        if #available(macOS 14.0, *) {
-            layer.preferredFrameRateRange = high
-                ? CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
-                : CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-        }
-    }
-
     func update(state: MixState) {
         guard size != .zero else { return }
-
-        applyFrameRate(state.highFrameRate, to: root)
 
         let areaScale = Float(max(size.width / 1920.0, 0.6))
         let drift = autoWind()
@@ -216,7 +203,6 @@ final class SceneLayers {
 
             if emitter.isHidden || wasOff {
                 emitter.isHidden = false
-                applyFrameRate(state.highFrameRate, to: emitter)
                 // Pre-roll so the scene arrives already full, rather than
                 // filling in from the top edge over several seconds.
                 emitter.beginTime = CACurrentMediaTime() - Double(preroll(for: layer))

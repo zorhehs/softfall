@@ -190,8 +190,6 @@ struct ControlPanelView: View {
                             .controlSize(.small)
                     }
 
-                    Toggle("Smoother motion", isOn: $state.highFrameRate)
-                        .help("Asks the system for a higher frame rate. Only does anything on a display that can show one, and costs more power.")
                     Toggle("Calm mode", isOn: $state.calmMode)
                         .help("Fewer particles, softer contrast.")
                     Toggle("Show on all displays", isOn: $state.allDisplays)
