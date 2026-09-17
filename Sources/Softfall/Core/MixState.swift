@@ -46,6 +46,9 @@ final class MixState: ObservableObject {
 
     // MARK: Behaviour
 
+    /// Step aside when something else needs to be heard.
+    @Published var duckOnCalls: Bool = true
+    @Published var duckOnMusic: Bool = true
     @Published var pauseVisualsWhenFullScreen: Bool = true
     /// Off by default. Being unplugged is not a request for an invisible app.
     @Published var pauseVisualsOnBattery: Bool = false
@@ -108,7 +111,7 @@ final class MixState: ObservableObject {
     /// A layer the current scene does not use is simply silent.
     func effectiveGain(_ layer: Layer) -> Double {
         guard isPlaying, current.sound, scene.layers.contains(layer) else { return 0 }
-        return current.level * scene.weight(for: layer) * masterVolume * fadeMultiplier
+        return current.level * scene.weight(for: layer) * masterVolume * fadeMultiplier * duckMultiplier
     }
 
     /// Particle density for one engine layer.
