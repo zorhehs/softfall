@@ -10,9 +10,9 @@ final class MainWindowController {
 
     private let window: NSWindow
 
-    init(state: MixState) {
+    init(state: MixState, onOpenSettings: @escaping () -> Void) {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 400),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -21,11 +21,17 @@ final class MainWindowController {
         // A programmatically created window releases itself when closed, which
         // would leave this holding a dead object the second time you open it.
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: MainWindowView(state: state))
-        window.contentMinSize = NSSize(width: 660, height: 460)
+        window.contentViewController = NSHostingController(
+            rootView: MainWindowView(state: state, onOpenSettings: onOpenSettings)
+        )
+        window.contentMinSize = NSSize(width: 340, height: 300)
         window.center()
         // Remembers where you put it, per user, with no code of ours.
-        window.setFrameAutosaveName("SoftfallMainWindow")
+        //
+        // The name is versioned because the autosaved frame outlives the code:
+        // anyone who ran the 720x520 window would have that frame restored over
+        // this one and conclude nothing had changed.
+        window.setFrameAutosaveName("SoftfallMainWindow2")
     }
 
     var isVisible: Bool { window.isVisible }

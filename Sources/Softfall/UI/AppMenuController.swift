@@ -10,11 +10,15 @@ final class AppMenuController: NSObject, NSMenuDelegate {
 
     private let state: MixState
     private let onShowWindow: () -> Void
+    private let onShowSettings: () -> Void
     private var sceneMenu: NSMenu?
 
-    init(state: MixState, onShowWindow: @escaping () -> Void) {
+    init(state: MixState,
+         onShowWindow: @escaping () -> Void,
+         onShowSettings: @escaping () -> Void) {
         self.state = state
         self.onShowWindow = onShowWindow
+        self.onShowSettings = onShowSettings
         super.init()
     }
 
@@ -36,6 +40,13 @@ final class AppMenuController: NSObject, NSMenuDelegate {
         menu.addItem(withTitle: "About Softfall",
                      action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                      keyEquivalent: "")
+        menu.addItem(.separator())
+
+        // Command-comma. Every Mac user already knows where settings are; the
+        // job is to not be the app that disappoints them.
+        menu.addItem(withTitle: "Settings…",
+                     action: #selector(showSettings),
+                     keyEquivalent: ",").target = self
         menu.addItem(.separator())
 
         let hide = menu.addItem(withTitle: "Hide Softfall",
@@ -167,5 +178,9 @@ final class AppMenuController: NSObject, NSMenuDelegate {
 
     @objc private func showWindow() {
         onShowWindow()
+    }
+
+    @objc private func showSettings() {
+        onShowSettings()
     }
 }

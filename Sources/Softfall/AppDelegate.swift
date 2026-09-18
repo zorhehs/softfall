@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var window: MainWindowController!
     private var appMenu: AppMenuController!
+    private var settings: SettingsWindowController!
     private var tickTimer: Timer?
     private var lastSceneKey: String?
     private var lastSuspend: Bool?
@@ -39,17 +40,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.isDucked = self.ducker.isDucking
         }
 
-        window = MainWindowController(state: state)
+        settings = SettingsWindowController(state: state)
+        window = MainWindowController(state: state) { [weak self] in self?.settings.show() }
 
         // The menu bar item no longer owns a popover — it opens the window, or
         // offers the quick menu on a right-click.
         menuBar = MenuBarController(
             state: state,
             onOpenWindow: { [weak self] in self?.window.toggle() },
+            onOpenSettings: { [weak self] in self?.settings.show() },
             onQuit: { NSApp.terminate(nil) }
         )
 
-        appMenu = AppMenuController(state: state) { [weak self] in self?.window.show() }
+        appMenu = AppMenuController(
+            state: state,
+            onShowWindow: { [weak self] in self?.window.show() },
+            onShowSettings: { [weak self] in self?.settings.show() }
+        )
         appMenu.install()
 
         state.onChange = { [weak self] in self?.stateChanged() }

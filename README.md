@@ -28,6 +28,10 @@ brew install --cask softfall
 Or grab the `.zip` from [Releases](https://github.com/zorhehs/softfall/releases),
 unzip it, and drag `Softfall.app` to `/Applications`.
 
+The window holds four things: which weather, whether it is running, how much
+of it, and how loud. Everything you set once — placement, colour, frame rate,
+what happens on battery — is in Settings, behind Command-comma.
+
 Softfall opens its window on first launch. After that the cloud in your menu
 bar is the quickest way back to it — click it to show or hide the window,
 right-click for pause and scene switching without raising anything. The window

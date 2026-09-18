@@ -11,11 +11,16 @@ final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let state: MixState
     private let onOpenWindow: () -> Void
+    private let onOpenSettings: () -> Void
     private let onQuit: () -> Void
 
-    init(state: MixState, onOpenWindow: @escaping () -> Void, onQuit: @escaping () -> Void) {
+    init(state: MixState,
+         onOpenWindow: @escaping () -> Void,
+         onOpenSettings: @escaping () -> Void,
+         onQuit: @escaping () -> Void) {
         self.state = state
         self.onOpenWindow = onOpenWindow
+        self.onOpenSettings = onOpenSettings
         self.onQuit = onQuit
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -57,6 +62,10 @@ final class MenuBarController: NSObject {
         open.target = self
         menu.addItem(open)
 
+        let prefs = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+        prefs.target = self
+        menu.addItem(prefs)
+
         menu.addItem(.separator())
 
         let toggle = NSMenuItem(
@@ -92,6 +101,10 @@ final class MenuBarController: NSObject {
 
     @objc private func openWindow() {
         onOpenWindow()
+    }
+
+    @objc private func openSettings() {
+        onOpenSettings()
     }
 
     @objc private func togglePlaying() {
