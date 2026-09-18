@@ -22,7 +22,7 @@ final class MainWindowController {
         // would leave this holding a dead object the second time you open it.
         window.isReleasedWhenClosed = false
         window.contentViewController = NSHostingController(rootView: MainWindowView(state: state))
-        window.contentMinSize = NSSize(width: 620, height: 440)
+        window.contentMinSize = NSSize(width: 660, height: 460)
         window.center()
         // Remembers where you put it, per user, with no code of ours.
         window.setFrameAutosaveName("SoftfallMainWindow")

@@ -1,78 +1,67 @@
 import SwiftUI
 
-/// The window. Two columns: what you are listening to on the left, how it
-/// behaves on the right.
+/// The window.
 ///
-/// The old popover had to hide its settings behind a disclosure triangle
-/// because it was 332 points wide and anchored to the menu bar. A window has
-/// room to show everything at once, which is most of the reason for having one.
+/// Built out of the platform's own two-column idiom rather than a hand-rolled
+/// one: `NavigationSplitView` with a real sidebar `List`, and a grouped `Form`
+/// for everything else. The first version of this window stacked VStacks and
+/// aligned its own label columns to a fixed 72 points, which meant
+/// reimplementing — badly — what a `Form` already does: consistent label and
+/// control alignment, correct spacing, grouped boxes, and the look people
+/// already know from System Settings.
+///
+/// Using the real sidebar also brings selection that follows the accent colour
+/// and window focus, keyboard navigation between scenes, and the collapse
+/// button in the title bar. None of that was worth writing by hand.
 struct MainWindowView: View {
     @ObservedObject var state: MixState
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             sidebar
-                .frame(width: 214)
-                .background(.ultraThinMaterial)
-
-            Divider()
-
+                .navigationSplitViewColumnWidth(min: 176, ideal: 196, max: 240)
+        } detail: {
             detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle("Softfall")
+                .navigationSubtitle(statusLine)
         }
-        .frame(minWidth: 620, minHeight: 440)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    state.isPlaying.toggle()
+                } label: {
+                    Label(state.isPlaying ? "Pause" : "Play",
+                          systemImage: state.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .help(state.isPlaying ? "Pause" : "Resume")
+            }
+        }
+        .frame(minWidth: 660, minHeight: 460)
     }
 
     // MARK: Sidebar
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            transport
-                .padding(.horizontal, 14)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-
-            VStack(spacing: 4) {
-                ForEach(Scene.allCases) { scene in
-                    SceneRow(scene: scene, isActive: state.scene == scene) {
-                        withAnimation(.easeOut(duration: 0.18)) { state.select(scene) }
-                    }
-                }
-            }
-            .padding(.horizontal, 8)
-
-            Spacer(minLength: 12)
-
-            Divider()
-            sleepTimer
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-        }
+    /// `List` selection is optional by nature — nothing selected is a state it
+    /// has to be able to express — while the app always has a scene. The
+    /// adapter keeps that difference from leaking into `MixState`.
+    private var selection: Binding<Scene?> {
+        Binding(
+            get: { state.scene },
+            set: { if let scene = $0 { state.select(scene) } }
+        )
     }
 
-    private var transport: some View {
-        HStack(spacing: 11) {
-            Button {
-                state.isPlaying.toggle()
-            } label: {
-                Image(systemName: state.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 31, weight: .light))
-                    .foregroundStyle(state.isPlaying ? Color.accentColor : Color.secondary)
+    private var sidebar: some View {
+        List(selection: selection) {
+            Section("Scenes") {
+                ForEach(Scene.allCases) { scene in
+                    Label(scene.title, systemImage: scene.symbol)
+                        .tag(scene as Scene?)
+                        .help(scene.blurb)
+                }
             }
-            .buttonStyle(.plain)
-            .help(state.isPlaying ? "Pause" : "Resume")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Softfall")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(statusLine)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
         }
+        .listStyle(.sidebar)
     }
 
     private var statusLine: String {
@@ -80,7 +69,7 @@ struct MainWindowView: View {
         if let text = sleepText { return text }
         if !state.isPlaying { return "Paused" }
         if !state.current.isActive { return "Nothing playing" }
-        return "Playing"
+        return state.scene.blurb
     }
 
     private var sleepText: String? {
@@ -91,199 +80,154 @@ struct MainWindowView: View {
         return minutes > 0 ? "Fading out in \(minutes)m" : "Fading out in \(seconds)s"
     }
 
-    private var sleepTimer: some View {
-        Menu {
-            Button("Off") { state.sleepTimerEndsAt = nil }
-            Divider()
-            ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
-                Button("\(minutes) minutes") {
-                    state.sleepTimerEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
-                }
-            }
-        } label: {
-            Label(state.sleepTimerEndsAt == nil ? "Sleep timer" : "Timer on", systemImage: "moon.zzz")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .font(.system(size: 11.5))
-    }
-
     // MARK: Detail
 
     private var detail: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                thisScene
-                ducking
-                appearance
-                displays
-                behaviour
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Form {
+            sceneSection
+            appearanceSection
+            displaysSection
+            duckingSection
+            behaviourSection
+            sleepSection
         }
+        .formStyle(.grouped)
     }
 
-    private var thisScene: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            SectionLabel(state.scene.title)
-
+    private var sceneSection: some View {
+        Section {
             // Two switches, not one. Rain on screen in silence and rain in
-            // your ears with a still desktop are both things people want.
-            HStack(spacing: 8) {
-                SwitchTile(
-                    title: "Picture",
-                    symbol: state.current.picture ? "eye.fill" : "eye.slash",
-                    isOn: state.current.picture
-                ) {
-                    state.updateCurrent { $0.picture.toggle() }
-                }
-                SwitchTile(
-                    title: "Sound",
-                    symbol: state.current.sound ? "speaker.wave.2.fill" : "speaker.slash",
-                    isOn: state.current.sound
-                ) {
-                    state.updateCurrent { $0.sound.toggle() }
-                }
-            }
-            .frame(maxWidth: 330)
+            // your ears over a still desktop are both things people want.
+            Toggle("Picture", isOn: Binding(
+                get: { state.current.picture },
+                set: { v in state.updateCurrent { $0.picture = v } }
+            ))
+            Toggle("Sound", isOn: Binding(
+                get: { state.current.sound },
+                set: { v in state.updateCurrent { $0.sound = v } }
+            ))
 
-            SliderRow(
-                title: "Amount",
-                symbol: "slider.horizontal.3",
-                range: 0.02...1,
+            Slider(
                 value: Binding(
                     get: { state.current.level },
                     set: { v in state.updateCurrent { $0.level = v } }
                 ),
-                trailing: "\(Int(state.current.level * 100))%"
-            )
+                in: 0.02...1
+            ) {
+                Text("Amount")
+            }
 
-            SliderRow(
-                title: "Volume",
-                symbol: state.masterVolume < 0.01 ? "speaker.slash" : "speaker.wave.2",
-                range: 0...1,
-                value: $state.masterVolume,
-                trailing: "\(Int(state.masterVolume * 100))%"
-            )
+            Slider(value: $state.masterVolume, in: 0...1) {
+                Text("Volume")
+            }
 
             // Only rain and thunder run the rain voice; a campfire has no use
             // for it, so the control is not offered there.
             if state.scene != .campfire {
-                SliderRow(
-                    title: "Rain tone",
-                    symbol: "water.waves",
-                    range: 0...1,
-                    value: $state.rainTone,
-                    trailing: "\(Int(state.rainTone * 100))%"
-                )
+                Slider(value: $state.rainTone, in: 0...1) {
+                    Text("Rain tone")
+                } minimumValueLabel: {
+                    Image(systemName: "speaker.wave.1")
+                } maximumValueLabel: {
+                    Image(systemName: "speaker.wave.3")
+                }
                 .help("Left is rain heard through a closed window. Right opens it.")
             }
+        } header: {
+            Text(state.scene.title)
+        } footer: {
+            Text(state.scene.blurb)
+                .foregroundStyle(.secondary)
         }
     }
 
-    /// Ported from the popover this window replaced. The controls came from
-    /// the auto-ducking work on `develop`; deleting that panel must not delete
-    /// the only way to reach them.
-    private var ducking: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            SectionLabel("When something else is playing")
-            Toggle("Quieten during calls", isOn: $state.duckOnCalls)
-                .help("Fades down whenever the microphone goes live, and back up afterwards.")
-            Toggle("Quieten while music plays", isOn: $state.duckOnMusic)
-                .help("Follows Apple Music and Spotify.")
-        }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .font(.system(size: 11.5))
-    }
-
-    private var appearance: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            SectionLabel("Appearance")
-
-            Picker("", selection: $state.placement) {
+    private var appearanceSection: some View {
+        Section("Appearance") {
+            Picker("Placement", selection: $state.placement) {
                 ForEach(OverlayPlacement.allCases) { placement in
                     Text(placement.title).tag(placement)
                 }
             }
             .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 330)
 
             Text(state.placement.detail)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            SliderRow(
-                title: "Visibility",
-                symbol: "circle.lefthalf.filled",
-                range: 0.15...1,
-                value: $state.opacity,
-                trailing: "\(Int(state.opacity * 100))%"
-            )
-
-            SliderRow(
-                title: "Rain colour",
-                symbol: "drop.fill",
-                range: 0...1,
-                value: $state.rainBlue,
-                trailing: "\(Int(state.rainBlue * 100))%"
-            )
-            .help("White at the left, cold blue at the right. How far you can go depends on the wallpaper behind it.")
-
-            HStack(spacing: 9) {
-                Image(systemName: "speedometer")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 15)
-                Text("Frame rate")
-                    .font(.system(size: 11.5))
-                    .frame(width: 72, alignment: .leading)
-                Picker("", selection: $state.frameRate) {
-                    ForEach(RainFrameRate.allCases) { rate in
-                        Text(rate.title).tag(rate)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 230)
-                Spacer(minLength: 0)
+            Slider(value: $state.opacity, in: 0.15...1) {
+                Text("Visibility")
             }
+
+            Slider(value: $state.rainBlue, in: 0...1) {
+                Text("Rain colour")
+            }
+            .help("Left is white, right is a cold blue. How far it can go before it disappears depends on the wallpaper behind it.")
+
+            Picker("Frame rate", selection: $state.frameRate) {
+                ForEach(RainFrameRate.allCases) { rate in
+                    Text(rate.title).tag(rate)
+                }
+            }
+            .pickerStyle(.segmented)
             .help("Lower is cheaper. Thirty still reads as continuous motion.")
 
             Toggle("Calm mode", isOn: $state.calmMode)
                 .help("Fewer drops, slower fall, softer contrast.")
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .font(.system(size: 11.5))
     }
 
-    private var displays: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            SectionLabel("Displays")
+    private var displaysSection: some View {
+        Section("Displays") {
             Toggle("Show on all displays", isOn: $state.allDisplays)
             Toggle("Hide over full-screen apps", isOn: $state.pauseVisualsWhenFullScreen)
-                .help("Leaves films, presentations and full-screen editors untouched.")
+                .help("Leaves films, presentations and full-screen editors untouched. Turn this off to see weather over them.")
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .font(.system(size: 11.5))
     }
 
-    private var behaviour: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            SectionLabel("Behaviour")
+    /// From the auto-ducking work. The popover this window replaced was the
+    /// only way to reach these, so they came across with it.
+    private var duckingSection: some View {
+        Section("When something else is playing") {
+            Toggle("Quieten during calls", isOn: $state.duckOnCalls)
+                .help("Fades down whenever the microphone goes live, and back up afterwards.")
+            Toggle("Quieten while music plays", isOn: $state.duckOnMusic)
+                .help("Follows Apple Music and Spotify.")
+        }
+    }
+
+    private var behaviourSection: some View {
+        Section("Behaviour") {
             Toggle("Pause animation on battery", isOn: $state.pauseVisualsOnBattery)
                 .help("Off by default. Sound always keeps playing.")
             Toggle("Open at login", isOn: $state.launchAtLogin)
             Toggle("Open this window at launch", isOn: $state.openWindowAtLaunch)
                 .help("Turn this off if you only want the menu bar icon when Softfall starts.")
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .font(.system(size: 11.5))
+    }
+
+    private var sleepSection: some View {
+        Section {
+            // A timer is an action rather than a setting: the remaining time
+            // counts down, so there is no stable value for a picker to show.
+            Menu {
+                Button("Off") { state.sleepTimerEndsAt = nil }
+                Divider()
+                ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
+                    Button("\(minutes) minutes") {
+                        state.sleepTimerEndsAt = Date().addingTimeInterval(Double(minutes) * 60)
+                    }
+                }
+            } label: {
+                Label(state.sleepTimerEndsAt == nil ? "Set a sleep timer" : "Change the timer",
+                      systemImage: "moon.zzz")
+            }
+            .fixedSize()
+        } header: {
+            Text("Sleep timer")
+        } footer: {
+            Text(sleepText ?? "Fades out across the last two minutes rather than cutting off.")
+                .foregroundStyle(.secondary)
+        }
     }
 }
