@@ -76,6 +76,36 @@ struct BrownNoise {
 
 // MARK: - Biquad (RBJ cookbook, transposed direct form II)
 
+/// A Schroeder allpass: flat magnitude response, scrambled phase.
+///
+/// It passes every frequency at the same level but smears energy across time,
+/// which is exactly what turns a click into a hush. Three in series, at delays
+/// that are not multiples of one another, take a droplet that arrives as a
+/// point and spread it into something with a shape — the difference between
+/// rain heard in a room and rain played through a speaker in your head.
+///
+/// The buffer is allocated once, at init. Allocating on the audio thread is
+/// how you get a dropout.
+struct Allpass {
+    private var buffer: [Double]
+    private var index = 0
+    private let gain: Double
+
+    init(delaySamples: Int, gain: Double = 0.55) {
+        buffer = Array(repeating: 0.0, count: max(1, delaySamples))
+        self.gain = min(max(gain, -0.95), 0.95)
+    }
+
+    mutating func process(_ x: Double) -> Double {
+        let delayed = buffer[index]
+        let y = -gain * x + delayed
+        buffer[index] = x + gain * y
+        index += 1
+        if index >= buffer.count { index = 0 }
+        return y
+    }
+}
+
 struct Biquad {
     enum Kind { case lowpass, highpass, bandpass, peaking }
 

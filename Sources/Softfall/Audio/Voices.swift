@@ -31,6 +31,15 @@ struct RainVoice {
     private var hpL = Biquad(), hpR = Biquad()
     private var roarL = Biquad(), roarR = Biquad()
 
+    /// Three allpasses per channel at delays that do not divide into one
+    /// another, so the smear has no audible period. Different lengths left and
+    /// right, which is where the width comes from.
+    private var diffL: [Allpass]
+    private var diffR: [Allpass]
+    /// The droplets are rolled off separately from the bed. A droplet only
+    /// needs enough top to say "water"; anything above this is just a tick.
+    private var dropLpL = Biquad(), dropLpR = Biquad()
+
     private var gust: RandomWalk
     private var drift: RandomWalk
     private var droplets: [Droplet]
@@ -59,19 +68,30 @@ struct RainVoice {
         // and this is most of what the ear uses to tell them apart.
         drift = RandomWalk(seed: seed &+ 15, lo: 0.88, hi: 1.14, minSeconds: 6, maxSeconds: 17, sampleRate: sampleRate)
         droplets = Array(repeating: Droplet(), count: 10)
+
+        // Milliseconds, deliberately not harmonically related. Keeping them
+        // short means diffusion rather than an audible echo.
+        func taps(_ ms: [Double]) -> [Allpass] {
+            ms.map { Allpass(delaySamples: Int($0 * 0.001 * sampleRate), gain: 0.55) }
+        }
+        diffL = taps([7.3, 11.9, 19.7])
+        diffR = taps([8.9, 13.7, 22.1])
     }
 
-    private mutating func retune(_ intensity: Double, _ driftAmount: Double) {
+    private mutating func retune(_ intensity: Double, _ driftAmount: Double, _ tone: Double) {
         // Light rain is distant and muffled; heavy rain moves closer and opens
         // up. Even at full intensity this stays well below the old 9 kHz.
-        let cutoff = lerp(1750, 4100, intensity) * driftAmount
+        // Tone then tilts the whole thing: 0 is rain through a closed window,
+        // 1 is rain on the other side of an open one.
+        let toneScale = lerp(0.70, 1.40, min(max(tone, 0), 1))
+        let cutoff = lerp(1750, 4100, intensity) * driftAmount * toneScale
         lp1L.set(.lowpass, freq: cutoff, q: 0.62, sampleRate: sampleRate)
         lp1R.set(.lowpass, freq: cutoff * 0.94, q: 0.62, sampleRate: sampleRate)
         lp2L.set(.lowpass, freq: cutoff * 1.22, q: 0.54, sampleRate: sampleRate)
         lp2R.set(.lowpass, freq: cutoff * 1.15, q: 0.54, sampleRate: sampleRate)
 
         // Clear the very bottom so the bed does not fight the roar.
-        let hp = lerp(165, 100, intensity)
+        let hp = lerp(140, 85, intensity)
         hpL.set(.highpass, freq: hp, q: 0.55, sampleRate: sampleRate)
         hpR.set(.highpass, freq: hp * 1.08, q: 0.55, sampleRate: sampleRate)
 
@@ -81,15 +101,19 @@ struct RainVoice {
 
         // Present even in drizzle. Without low weight the bed is just hiss.
         roarGain = lerp(0.34, 0.92, intensity)
+
+        let dropCut = lerp(1500, 2600, intensity) * toneScale
+        dropLpL.set(.lowpass, freq: dropCut, q: 0.6, sampleRate: sampleRate)
+        dropLpR.set(.lowpass, freq: dropCut * 0.95, q: 0.6, sampleRate: sampleRate)
     }
 
-    mutating func render(intensity: Double) -> Frame {
+    mutating func render(intensity: Double, tone: Double) -> Frame {
         let driftAmount = drift.step()
 
         retuneCounter += 1
         if retuneCounter >= 64 {
             retuneCounter = 0
-            retune(intensity, driftAmount)
+            retune(intensity, driftAmount, tone)
         }
 
         let g = gust.step()
@@ -111,28 +135,44 @@ struct RainVoice {
             nextDroplet = (dropletRng.range(0.35, 1.9) / ratePerSecond) * sampleRate
             dropIndex = (dropIndex + 1) % droplets.count
             var d = droplets[dropIndex]
-            let top = lerp(1900.0, 3100.0, intensity)
+            // Lower, blunter and longer than they were. A high-Q ping at
+            // 3 kHz sits exactly where hearing is most sensitive, which is why
+            // the old droplets read as ticks rather than as water.
+            let top = lerp(1250.0, 1900.0, intensity)
             d.filter.set(.bandpass,
-                         freq: dropletRng.range(520, top),
-                         q: dropletRng.range(1.8, 4.5),
+                         freq: dropletRng.range(360, top),
+                         q: dropletRng.range(1.0, 2.4),
                          sampleRate: sampleRate)
-            d.decay = exp(-1.0 / (dropletRng.range(0.010, 0.048) * sampleRate))
+            d.decay = exp(-1.0 / (dropletRng.range(0.035, 0.115) * sampleRate))
             d.env = dropletRng.range(0.2, 1.0)
             d.pan = dropletRng.unit()
             d.excite = 1.0
             droplets[dropIndex] = d
         }
 
+        var dropL = 0.0
+        var dropR = 0.0
         for i in droplets.indices where droplets[i].env > 0.0005 {
             var d = droplets[i]
-            let input = d.excite + dropletRng.bipolar() * 0.45
+            let input = d.excite + dropletRng.bipolar() * 0.30
             d.excite = 0
-            let s = d.filter.process(input) * d.env * 0.17
+            let s = d.filter.process(input) * d.env * 0.13
             d.env *= d.decay
             droplets[i] = d
-            l += s * (1.0 - d.pan)
-            r += s * d.pan
+            dropL += s * (1.0 - d.pan)
+            dropR += s * d.pan
         }
+
+        // Diffuse before mixing in, and run the chain every sample so tails
+        // ring out rather than stopping dead. A dry droplet arrives as a point
+        // inside your head; a smeared one arrives as weather in a room. Some
+        // dry is kept so the nearest drops still have an edge to them.
+        var wetL = dropL
+        var wetR = dropR
+        for i in diffL.indices { wetL = diffL[i].process(wetL) }
+        for i in diffR.indices { wetR = diffR[i].process(wetR) }
+        l += dropLpL.process(dropL * 0.35 + wetL * 0.75)
+        r += dropLpR.process(dropR * 0.35 + wetR * 0.75)
 
         return (l * 0.46, r * 0.46)
     }

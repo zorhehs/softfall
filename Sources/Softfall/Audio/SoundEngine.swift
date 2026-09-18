@@ -27,6 +27,10 @@ private final class Synth {
     var masterSmoother: Smoothed
     var master: Double = 1.0
 
+    /// 0 is rain through a closed window, 1 is through an open one. Read on
+    /// the audio thread like every other parameter here.
+    var rainTone: Double = 0.35
+
     var thunderRequest = false
     var thunderDistance = 0.5
     private var useThunderB = false
@@ -147,7 +151,7 @@ final class SoundEngine: NSObject {
                     let f: Frame
                     switch synth.kinds[index] {
                     case .rain:
-                        f = synth.rain.render(intensity: level)
+                        f = synth.rain.render(intensity: level, tone: synth.rainTone)
                     case .thunder:
                         let a = synth.thunderA.render()
                         let b = synth.thunderB.render()
@@ -194,6 +198,7 @@ final class SoundEngine: NSObject {
             synth.gains[index] = state.effectiveGain(layer)
             synth.levels[index] = state.level(layer)
         }
+        synth.rainTone = state.rainTone
         synth.master = state.isPlaying ? 1.0 : 0.0
     }
 

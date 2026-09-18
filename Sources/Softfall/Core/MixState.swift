@@ -47,6 +47,10 @@ final class MixState: ObservableObject {
     /// how blue rain can be before it vanishes depends entirely on the
     /// wallpaper behind it, and this app has overshot that before.
     @Published var rainBlue: Double = 0.85
+    /// How dark the rain sounds. 0 is heard through a closed window, 1 is
+    /// through an open one. Like the colour, this is a matter of taste and of
+    /// what you are listening on, so it is a control rather than a constant.
+    @Published var rainTone: Double = 0.35
     /// How often the rain is drawn. Lower is cheaper and, at 30, still
     /// continuous — a near streak is longer than the distance it travels in
     /// one frame, so consecutive frames overlap.
@@ -164,6 +168,7 @@ final class MixState: ObservableObject {
         var pauseVisualsWhenFullScreen: Bool
         var launchAtLogin: Bool
         var rainBlue: Double?
+        var rainTone: Double?
         var frameRate: RainFrameRate?
         /// Optional on purpose. A non-optional field added to this struct makes
         /// every previously saved blob fail to decode, which silently resets
@@ -189,6 +194,7 @@ final class MixState: ObservableObject {
             pauseVisualsWhenFullScreen: pauseVisualsWhenFullScreen,
             launchAtLogin: launchAtLogin,
             rainBlue: rainBlue,
+            rainTone: rainTone,
             frameRate: frameRate,
             openWindowAtLaunch: openWindowAtLaunch,
             duckOnCalls: duckOnCalls,
@@ -220,6 +226,7 @@ final class MixState: ObservableObject {
         pauseVisualsWhenFullScreen = stored.pauseVisualsWhenFullScreen
         launchAtLogin = stored.launchAtLogin
         rainBlue = stored.rainBlue ?? 0.85
+        rainTone = stored.rainTone ?? 0.35
         frameRate = stored.frameRate ?? .thirty
         openWindowAtLaunch = stored.openWindowAtLaunch ?? true
         duckOnCalls = stored.duckOnCalls ?? true

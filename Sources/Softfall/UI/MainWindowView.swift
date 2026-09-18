@@ -166,6 +166,19 @@ struct MainWindowView: View {
                 value: $state.masterVolume,
                 trailing: "\(Int(state.masterVolume * 100))%"
             )
+
+            // Only rain and thunder run the rain voice; a campfire has no use
+            // for it, so the control is not offered there.
+            if state.scene != .campfire {
+                SliderRow(
+                    title: "Rain tone",
+                    symbol: "water.waves",
+                    range: 0...1,
+                    value: $state.rainTone,
+                    trailing: "\(Int(state.rainTone * 100))%"
+                )
+                .help("Left is rain heard through a closed window. Right opens it.")
+            }
         }
     }
 
