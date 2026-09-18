@@ -18,6 +18,7 @@ final class SceneLayers {
     private let atmosphere = CAGradientLayer()
     private let rain = RainLayer()
     private let embers = CAEmitterLayer()
+    private let lightning = LightningLayer()
     private let flash = CALayer()
     private var size: CGSize = .zero
     private var scale: CGFloat = 2
@@ -57,11 +58,16 @@ final class SceneLayers {
         buildEmbers(size: size)
         root.addSublayer(embers)
 
+        // The sheet of light sits under the bolt, so the bolt stays legible
+        // against its own flash.
         flash.frame = CGRect(origin: .zero, size: size)
-        flash.backgroundColor = NSColor.white.cgColor
+        // Warm rather than pure white, to agree with the yellow of the bolt.
+        flash.backgroundColor = NSColor(calibratedRed: 1.0, green: 0.96, blue: 0.84, alpha: 1.0).cgColor
         flash.opacity = 0
         flash.isHidden = true
         root.addSublayer(flash)
+
+        root.addSublayer(lightning)
     }
 
     private func buildEmbers(size: CGSize) {
@@ -192,7 +198,17 @@ final class SceneLayers {
     /// follow a moment later.
     func flashLightning(distance: Double, opacityScale: Double) {
         let d = min(max(distance, 0), 1)
-        let peak = Float(lerp(0.40, 0.07, d) * opacityScale)
+
+        // The bolt and the sheet of light are one event, so they are fired
+        // together. The bolt decides for itself whether it is close enough to
+        // be visible at all — a distant strike is behind cloud, and all you
+        // get is the bloom.
+        lightning.strike(distance: d, opacityScale: opacityScale, in: size, scale: scale)
+
+        // Pull the sheet down when there is a bolt to see. At full strength it
+        // washes out the very thing it is meant to announce.
+        let hasBolt = d < 0.62
+        let peak = Float(lerp(0.40, 0.07, d) * opacityScale * (hasBolt ? 0.55 : 1.0))
         guard peak > 0.005 else { return }
 
         flash.isHidden = false

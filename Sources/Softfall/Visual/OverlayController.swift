@@ -240,9 +240,13 @@ final class LightningDirector {
 
         // A gentle setting means rare, far-off rumbles; a high one means a
         // storm more or less on top of you.
+        //
+        // These used to run from 26 to 77 seconds at the default level, which
+        // meant you could sit in a scene called Thunder for over a minute,
+        // hear nothing but rain, and reasonably conclude it was broken.
         let level = settings.level
-        let minGap = lerp(52, 5, level)
-        let maxGap = lerp(150, 17, level)
+        let minGap = lerp(26, 4, level)
+        let maxGap = lerp(74, 12, level)
         let gap = Double.random(in: minGap...maxGap, using: &rng)
 
         timer = Timer.scheduledTimer(withTimeInterval: gap, repeats: false) { [weak self] _ in
