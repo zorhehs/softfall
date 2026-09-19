@@ -13,11 +13,25 @@ struct MainWindowView: View {
     let preview: ScenePreview
     var onOpenSettings: () -> Void
 
+    /// The window is a picture until you reach for it. Three seconds after
+    /// the pointer stops moving — one after it leaves — the controls sink to
+    /// a third and the scene name goes; a twitch of the mouse brings them
+    /// back. A window you are not looking at (not key) is idle regardless.
+    @State private var idle = false
+    @State private var idleTask: Task<Void, Never>?
+    @State private var dragging = false
+    @Environment(\.controlActiveState) private var activeState
+
+    private var faded: Bool {
+        (idle && !dragging) || activeState == .inactive
+    }
+
     var body: some View {
         ZStack {
             Sky(scene: state.scene)
             ScenePreviewRepresentable(preview: preview)
             scrim
+                .opacity(faded ? 0.5 : 1)
             // The fire's glow is part of the scene, not the sky, and it rises
             // from the bottom edge — exactly where the scrim is darkest. So it
             // goes over the scrim, at the strength that reads through the text.
@@ -27,6 +41,29 @@ struct MainWindowView: View {
         .frame(minWidth: 320, minHeight: 520)
         .preferredColorScheme(.dark)
         .ignoresSafeArea()
+        .animation(.easeInOut(duration: faded ? 0.6 : 0.15), value: faded)
+        .onAppear { scheduleIdle(after: 3) }
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            switch phase {
+            case .active:
+                idle = false
+                scheduleIdle(after: 3)
+            case .ended:
+                scheduleIdle(after: 1)
+            }
+        }
+        .onChange(of: dragging) { _, isDragging in
+            if !isDragging { scheduleIdle(after: 3) }
+        }
+    }
+
+    private func scheduleIdle(after seconds: Double) {
+        idleTask?.cancel()
+        idleTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            idle = true
+        }
     }
 
     // MARK: Layers
@@ -55,6 +92,7 @@ struct MainWindowView: View {
                 // Leaves room for the traffic lights, which sit over the scene.
                 .padding(.top, 36)
                 .frame(maxWidth: .infinity)
+                .opacity(faded ? 0.3 : 1)
 
             Spacer(minLength: 0)
 
@@ -67,14 +105,17 @@ struct MainWindowView: View {
                         get: { state.current.level },
                         set: { v in state.updateCurrent { $0.level = v } }
                     ),
-                    in: 0.02...1
+                    in: 0.02...1,
+                    dragging: $dragging
                 )
-                HairlineSlider(label: "Volume", value: $state.masterVolume, in: 0...1)
+                HairlineSlider(label: "Volume", value: $state.masterVolume, in: 0...1, dragging: $dragging)
             }
             .padding(.top, 22)
+            .opacity(faded ? 0.3 : 1)
 
             footer
                 .padding(.top, 22)
+                .opacity(faded ? 0.3 : 1)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
@@ -118,6 +159,9 @@ struct MainWindowView: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
             }
+            // The name goes entirely when idle; the ring stays faint, so it
+            // is still there to click and still there for VoiceOver.
+            .opacity(faded ? 0 : 1)
 
             Spacer(minLength: 0)
 
@@ -139,6 +183,7 @@ struct MainWindowView: View {
             .buttonStyle(.plain)
             .help(state.isPlaying ? "Pause" : "Resume")
             .padding(.bottom, 4)
+            .opacity(faded ? 0.3 : 1)
         }
     }
 
@@ -238,11 +283,14 @@ private struct HairlineSlider: View {
     let label: String
     @Binding var value: Double
     let range: ClosedRange<Double>
+    /// Raised while the thumb is held, so the window never fades mid-drag.
+    @Binding var dragging: Bool
 
-    init(label: String, value: Binding<Double>, in range: ClosedRange<Double>) {
+    init(label: String, value: Binding<Double>, in range: ClosedRange<Double>, dragging: Binding<Bool>) {
         self.label = label
         self._value = value
         self.range = range
+        self._dragging = dragging
     }
 
     private var fraction: Double {
@@ -276,9 +324,11 @@ private struct HairlineSlider: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { drag in
+                            dragging = true
                             let f = max(0, min(1, drag.location.x / width))
                             value = range.lowerBound + f * (range.upperBound - range.lowerBound)
                         }
+                        .onEnded { _ in dragging = false }
                 )
             }
             .frame(height: 18)
