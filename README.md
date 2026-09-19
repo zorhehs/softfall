@@ -28,6 +28,10 @@ brew install --cask softfall
 Or grab the `.zip` from [Releases](https://github.com/zorhehs/softfall/releases),
 unzip it, and drag `Softfall.app` to `/Applications`.
 
+Either way, the app keeps itself current: it checks for a newer release once
+a day and offers to install it, and **Softfall → Check for Updates…** does it
+on demand. The switch is under Settings → Behaviour.
+
 The window holds four things: which weather, whether it is running, how much
 of it, and how loud. Everything you set once — placement, colour, frame rate,
 what happens on battery — is in Settings, behind Command-comma.
@@ -144,6 +148,34 @@ Sources/Softfall
 ├── Core/      Scene and layer model, saved state, power awareness
 └── UI/        The window, the app menu, and the menu bar item
 ```
+
+## In-app updates
+
+Updates are delivered by [Sparkle](https://sparkle-project.org), the framework
+most independently distributed Mac apps use. Each release carries an
+`appcast.xml` alongside its `.zip`; the app reads the newest one through
+`releases/latest/download/appcast.xml`, which GitHub redirects for us, so the
+feed needs no hosting of its own. The archive is signed with an EdDSA key, and
+the app refuses anything the matching public key does not verify.
+
+Setting this up is a one-time job for whoever cuts releases:
+
+```sh
+swift build                                        # fetches Sparkle
+.build/artifacts/sparkle/Sparkle/bin/generate_keys  # prints the public key
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private.key
+```
+
+Add the public key as the `SPARKLE_PUBLIC_ED_KEY` repository secret and the
+contents of `sparkle-private.key` as `SPARKLE_PRIVATE_ED_KEY`, then delete the
+file. The release workflow refuses to run without both, on purpose: a release
+that quietly ships without an updater is worse than one that does not ship.
+The private key lives in your login keychain from then on; `generate_keys`
+prints the same public key every time.
+
+A `--dev` build has no feed and no key, and hides the updater entirely — it
+would otherwise offer to replace itself with the latest release, which is the
+one thing a dev copy is for not being.
 
 ## A note on Gatekeeper
 

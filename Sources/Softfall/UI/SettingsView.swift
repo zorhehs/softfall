@@ -7,6 +7,7 @@ import SwiftUI
 /// settings window you can scan.
 struct SettingsView: View {
     @ObservedObject var state: MixState
+    @ObservedObject var updater: Updater
 
     var body: some View {
         TabView {
@@ -17,7 +18,8 @@ struct SettingsView: View {
             behaviour
                 .tabItem { Label("Behaviour", systemImage: "gearshape") }
         }
-        .frame(width: 470, height: 340)
+        // The Updates section only exists on a release build; give it the room.
+        .frame(width: 470, height: updater.isAvailable ? 420 : 340)
     }
 
     // MARK: Appearance
@@ -110,6 +112,21 @@ struct SettingsView: View {
                 Text("Off by default — being unplugged is not a request for an invisible app. Sound always keeps playing.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Hidden entirely on a build with no feed, rather than shown
+            // disabled: a switch that can never do anything is a bug report.
+            if updater.isAvailable {
+                Section("Updates") {
+                    Toggle("Check for updates automatically", isOn: $updater.checksAutomatically)
+                    HStack {
+                        Text("Softfall \(updater.currentVersion)")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Check Now") { updater.checkForUpdates(nil) }
+                            .disabled(!updater.canCheck)
+                    }
+                }
             }
         }
         .formStyle(.grouped)

@@ -9,14 +9,17 @@ import AppKit
 final class AppMenuController: NSObject, NSMenuDelegate {
 
     private let state: MixState
+    private let updater: Updater
     private let onShowWindow: () -> Void
     private let onShowSettings: () -> Void
     private var sceneMenu: NSMenu?
 
     init(state: MixState,
+         updater: Updater,
          onShowWindow: @escaping () -> Void,
          onShowSettings: @escaping () -> Void) {
         self.state = state
+        self.updater = updater
         self.onShowWindow = onShowWindow
         self.onShowSettings = onShowSettings
         super.init()
@@ -40,6 +43,14 @@ final class AppMenuController: NSObject, NSMenuDelegate {
         menu.addItem(withTitle: "About Softfall",
                      action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                      keyEquivalent: "")
+        // Where every Mac app keeps it: under About, above Settings. Sparkle
+        // greys it out itself while a check is running. A dev copy has no
+        // feed to check, so it gets no item rather than a dead one.
+        if updater.isAvailable {
+            menu.addItem(withTitle: "Check for Updates…",
+                         action: #selector(Updater.checkForUpdates(_:)),
+                         keyEquivalent: "").target = updater
+        }
         menu.addItem(.separator())
 
         // Command-comma. Every Mac user already knows where settings are; the
