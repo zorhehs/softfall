@@ -24,9 +24,14 @@ final class ScenePreview {
     }
 
     /// Fired by the overlay so the window lights up in the same instant.
-    func flashLightning(distance: Double) {
+    func flashLightning(_ strike: LightningStrike) {
         guard let state, state.isPlaying, state.scene == .thunder, state.current.picture else { return }
-        view?.scene.flashLightning(distance: distance, opacityScale: 1.0)
+        view?.scene.flashLightning(strike, opacityScale: 1.0)
+    }
+
+    func gust(_ strike: LightningStrike) {
+        guard let state, state.isPlaying, state.scene == .thunder, state.current.picture else { return }
+        view?.scene.gust(strike)
     }
 
     fileprivate func attach(_ view: ScenePreviewView) {

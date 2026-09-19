@@ -23,6 +23,10 @@ final class SceneLayers {
     private var size: CGSize = .zero
     private var scale: CGFloat = 2
     private var embersWereOff = true
+    /// The gust running ahead of a strike: when it began, how hard, which way.
+    private var gustStart: CFTimeInterval = -1
+    private var gustPeak: CGFloat = 0
+    private var gustHold: CFTimeInterval = 0
     /// The overlay fades to the user's visibility setting; a scene that lives
     /// inside a window of its own wants to be seen in full. Set once by the
     /// owner, never by state.
@@ -130,7 +134,42 @@ final class SceneLayers {
         let t = CACurrentMediaTime()
         let a = sin(t * 0.037)
         let b = sin(t * 0.0113 + 1.7)
-        return CGFloat((a * 0.62 + b * 0.38) * 0.34)
+        let wander = CGFloat((a * 0.62 + b * 0.38) * 0.34)
+        return max(-0.6, min(0.6, wander + gust(at: t)))
+    }
+
+    /// The transient a strike adds to the wind: up in a quarter second, held
+    /// until the flash, then let go over a second and a half. Smoothstep on
+    /// both ends — a gust that snaps on reads as a bug, not weather.
+    private func gust(at t: CFTimeInterval) -> CGFloat {
+        guard gustStart >= 0 else { return 0 }
+        let elapsed = t - gustStart
+        let rise = 0.25, release = 1.5
+        let shape: CGFloat
+        if elapsed < rise {
+            shape = smoothstep(elapsed / rise)
+        } else if elapsed < gustHold {
+            shape = 1
+        } else if elapsed < gustHold + release {
+            shape = 1 - smoothstep((elapsed - gustHold) / release)
+        } else {
+            gustStart = -1
+            return 0
+        }
+        return gustPeak * shape
+    }
+
+    private func smoothstep(_ x: Double) -> CGFloat {
+        let c = min(max(x, 0), 1)
+        return CGFloat(c * c * (3 - 2 * c))
+    }
+
+    /// The front arrives before the strike does.
+    func gust(_ strike: LightningStrike) {
+        guard strike.gustLead > 0 else { return }
+        gustStart = CACurrentMediaTime()
+        gustHold = strike.gustLead
+        gustPeak = CGFloat(strike.gustStrength * strike.gustDirection) * 0.5
     }
 
     /// Called from the display link. Allocation-free except for the drop
@@ -213,14 +252,13 @@ final class SceneLayers {
     /// Draws a flash. `distance` 0 is overhead, 1 is far off — it controls
     /// brightness and how sharp the flicker is, matching the thunder that will
     /// follow a moment later.
-    func flashLightning(distance: Double, opacityScale: Double) {
-        let d = min(max(distance, 0), 1)
+    func flashLightning(_ strike: LightningStrike, opacityScale: Double) {
+        let d = strike.distance
 
         // The bolt and the sheet of light are one event, so they are fired
-        // together. The bolt decides for itself whether it is close enough to
-        // be visible at all — a distant strike is behind cloud, and all you
-        // get is the bloom.
-        let origin = lightning.strike(distance: d, opacityScale: opacityScale, in: size, scale: scale)
+        // together. The bolt decides for itself whether there is anything to
+        // draw — a strike behind cloud is bloom only.
+        let origin = lightning.strike(strike, opacityScale: opacityScale, in: size, scale: scale)
 
         let peak = Float(lerp(0.42, 0.10, d) * opacityScale)
         guard peak > 0.005 else { return }
@@ -235,17 +273,29 @@ final class SceneLayers {
         flash.isHidden = false
         flash.removeAllAnimations()
 
-        // The same strokes as the bolt — leader, return, two more, afterglow —
-        // so the sky flickers in time with the channel.
-        let keyframes: [(time: Double, value: Float)] = [
-            (0.000, 0), (0.015, peak * 0.5), (0.050, peak * 0.1), (0.080, peak),
-            (0.140, peak * 0.25), (0.190, peak * 0.8), (0.320, peak * 0.3),
-            (0.600, peak * 0.08), (1.200, 0)
-        ]
+        // The sky lights on the strike's own strokes — the same list the bolt
+        // flickers to and the thunder cracks to. A faint lift while the
+        // leader creeps down, a jump on each return stroke, a slow fade after
+        // the last. A crawler lights the sky more gently than a bolt.
+        let stroke = strike.kind == .crawler ? 0.6 : 1.0
+        var keyframes: [(time: Double, value: Float)] = [(0, 0)]
+        if strike.leaderDuration > 0 {
+            keyframes.append((strike.leaderDuration - 0.004, peak * 0.08))
+        }
+        for s in strike.strokes {
+            let v = peak * Float(s.strength * stroke)
+            keyframes.append((s.time, v))
+            keyframes.append((s.time + 0.03, v * 0.35))
+            keyframes.append((s.time + 0.06, v * 0.15))
+        }
+        let last = strike.strokes.last?.time ?? 0
+        keyframes.append((last + 0.35, peak * 0.06))
+        keyframes.append((strike.duration + d * 0.4, 0))
+
         let animation = CAKeyframeAnimation(keyPath: "opacity")
-        animation.duration = 1.25 + d * 0.4
+        animation.duration = strike.duration + d * 0.4
         animation.values = keyframes.map { $0.value }
-        animation.keyTimes = keyframes.map { NSNumber(value: $0.time / animation.duration) }
+        animation.keyTimes = keyframes.map { NSNumber(value: min(max($0.time / animation.duration, 0), 1)) }
         animation.timingFunction = CAMediaTimingFunction(name: .linear)
         animation.isRemovedOnCompletion = true
         flash.add(animation, forKey: "flash")

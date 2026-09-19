@@ -27,7 +27,8 @@ final class OverlayController: NSObject {
     private var appliedFullScreenPolicy: Bool?
     /// Anything else that wants to light up with the sky — the main window's
     /// own copy of the scene — hangs off here.
-    var onFlash: ((Double) -> Void)?
+    var onFlash: ((LightningStrike) -> Void)?
+    var onGust: ((LightningStrike) -> Void)?
 
     init(state: MixState) {
         self.state = state
@@ -185,13 +186,23 @@ final class OverlayController: NSObject {
         refresh()
     }
 
-    func flashLightning(distance: Double) {
+    func flashLightning(_ strike: LightningStrike) {
         guard let state, state.isPlaying, !suspended else { return }
         guard state.scene == .thunder, state.current.picture else { return }
         for (_, screen) in screens {
-            screen.scene.flashLightning(distance: distance, opacityScale: state.opacity)
+            screen.scene.flashLightning(strike, opacityScale: state.opacity)
         }
-        onFlash?(distance)
+        onFlash?(strike)
+    }
+
+    /// The wind ahead of a strike, on every display and in the window.
+    func gust(_ strike: LightningStrike) {
+        guard let state, state.isPlaying, !suspended else { return }
+        guard state.scene == .thunder, state.current.picture else { return }
+        for (_, screen) in screens {
+            screen.scene.gust(strike)
+        }
+        onGust?(strike)
     }
 
     func tearDown() {
@@ -268,16 +279,32 @@ final class LightningDirector {
         let nearest = max(0.10, 1.0 - settings.level)
         let distance = Double.random(in: nearest...1.0, using: &rng)
 
-        overlay?.flashLightning(distance: distance)
+        // Decided once, here, and handed to both halves: the picture draws
+        // this strike's strokes, and the thunder cracks on the same ones.
+        let strike = LightningStrike.roll(distance: distance, using: &rng)
+
+        // The gust runs ahead: seen in the rain and heard under it now, with
+        // the flash following once the front has arrived.
+        if strike.gustLead > 0 {
+            overlay?.gust(strike)
+            if settings.sound { sound?.blowGust(strength: strike.gustStrength) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + strike.gustLead) { [weak self] in
+                self?.overlay?.flashLightning(strike)
+            }
+        } else {
+            overlay?.flashLightning(strike)
+        }
 
         guard settings.sound else { scheduleNext(); return }
 
-        // Roughly three seconds per kilometre, scaled into our 0...1 range.
-        let delay = 0.18 + distance * 4.6
+        // Roughly three seconds per kilometre, scaled into our 0...1 range,
+        // counted from the first return stroke — the light that made the
+        // sound — rather than from the leader.
+        let delay = strike.gustLead + strike.leaderDuration + 0.18 + distance * 4.6
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, let state = self.state, state.isPlaying,
                   state.scene == .thunder, state.current.sound else { return }
-            self.sound?.strikeThunder(distance: distance)
+            self.sound?.strikeThunder(strike)
         }
 
         scheduleNext()

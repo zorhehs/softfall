@@ -32,8 +32,11 @@ private final class Synth {
     var rainTone: Double = 0.35
 
     var thunderRequest = false
-    var thunderDistance = 0.5
+    var thunderCue = ThunderCue()
     private var useThunderB = false
+
+    var gustRequest = false
+    var gustStrength = 0.0
 
     init(sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -54,9 +57,15 @@ private final class Synth {
     func consumeThunderRequest() {
         guard thunderRequest else { return }
         thunderRequest = false
-        let d = thunderDistance
-        if useThunderB { thunderB.strike(distance: d) } else { thunderA.strike(distance: d) }
+        let cue = thunderCue
+        if useThunderB { thunderB.strike(cue) } else { thunderA.strike(cue) }
         useThunderB.toggle()
+    }
+
+    func consumeGustRequest() {
+        guard gustRequest else { return }
+        gustRequest = false
+        rain.blow(strength: gustStrength)
     }
 }
 
@@ -134,6 +143,7 @@ final class SoundEngine: NSObject {
                 : left
 
             synth.consumeThunderRequest()
+            synth.consumeGustRequest()
 
             let masterTarget = synth.master
 
@@ -202,11 +212,20 @@ final class SoundEngine: NSObject {
         synth.master = state.isPlaying ? 1.0 : 0.0
     }
 
-    /// Called by the lightning director once the flash has been drawn.
-    func strikeThunder(distance: Double) {
+    /// Called by the lightning director once the flash has been drawn. The
+    /// cue is written before the flag, and the render callback reads the flag
+    /// first, so it never plays a half-written strike.
+    func strikeThunder(_ strike: LightningStrike) {
         guard let synth else { return }
-        synth.thunderDistance = min(max(distance, 0), 1)
+        synth.thunderCue = ThunderCue(strike)
         synth.thunderRequest = true
+    }
+
+    /// The wind ahead of a strike. Value first, flag last, as with thunder.
+    func blowGust(strength: Double) {
+        guard let synth else { return }
+        synth.gustStrength = min(max(strength, 0), 1)
+        synth.gustRequest = true
     }
 
     var isActive: Bool { isRunning }

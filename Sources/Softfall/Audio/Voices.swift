@@ -42,6 +42,14 @@ struct RainVoice {
 
     private var gust: RandomWalk
     private var drift: RandomWalk
+    /// A gust on demand — the one that runs ahead of a lightning strike. It
+    /// rides on top of the free-running `gust` walk: a swell of the bed that
+    /// also opens the filters, so it sounds like wind and not like volume.
+    private var burstEnv = 0.0
+    private var burstTarget = 0.0
+    private var burstAttack = 0.0
+    private var burstDecay = 0.0
+    private var burstActive = false
     private var droplets: [Droplet]
     private var dropletRng: Random
     private var nextDroplet: Double = 0
@@ -84,7 +92,7 @@ struct RainVoice {
         // Tone then tilts the whole thing: 0 is rain through a closed window,
         // 1 is rain on the other side of an open one.
         let toneScale = lerp(0.70, 1.40, min(max(tone, 0), 1))
-        let cutoff = lerp(1750, 4100, intensity) * driftAmount * toneScale
+        let cutoff = lerp(1750, 4100, intensity) * driftAmount * toneScale * (1 + burstEnv * 0.4)
         lp1L.set(.lowpass, freq: cutoff, q: 0.62, sampleRate: sampleRate)
         lp1R.set(.lowpass, freq: cutoff * 0.94, q: 0.62, sampleRate: sampleRate)
         lp2L.set(.lowpass, freq: cutoff * 1.22, q: 0.54, sampleRate: sampleRate)
@@ -107,6 +115,14 @@ struct RainVoice {
         dropLpR.set(.lowpass, freq: dropCut * 0.95, q: 0.6, sampleRate: sampleRate)
     }
 
+    /// Start a gust: up in 0.3 s, gone over about 1.6 s.
+    mutating func blow(strength: Double) {
+        burstTarget = min(max(strength, 0), 1)
+        burstAttack = burstTarget / (0.3 * sampleRate)
+        burstDecay = exp(-1.0 / (1.6 * sampleRate))
+        burstActive = true
+    }
+
     mutating func render(intensity: Double, tone: Double) -> Frame {
         let driftAmount = drift.step()
 
@@ -116,7 +132,17 @@ struct RainVoice {
             retune(intensity, driftAmount, tone)
         }
 
-        let g = gust.step()
+        var g = gust.step()
+        if burstActive {
+            if burstEnv < burstTarget {
+                burstEnv = min(burstEnv + burstAttack, burstTarget)
+                if burstEnv >= burstTarget { burstTarget = 0 }
+            } else {
+                burstEnv *= burstDecay
+                if burstEnv < 0.001 { burstEnv = 0; burstActive = false }
+            }
+            g *= 1 + burstEnv * 0.7
+        }
 
         let nl = pinkL.process(rngL.bipolar())
         let nr = pinkR.process(rngR.bipolar())
@@ -180,16 +206,66 @@ struct RainVoice {
 
 // MARK: - Thunder
 
+/// A `LightningStrike` flattened for the audio thread: plain scalars only,
+/// because a struct holding an array is retained and released on copy, and
+/// the render callback must never touch the Swift runtime.
+struct ThunderCue {
+    enum Kind: Int { case bolt, crawler, sheet }
+
+    var kind: Kind = .bolt
+    var distance = 0.5
+    var strokeCount = 1
+    /// Seconds from the first stroke to each stroke; the first is always 0.
+    var strokeTimes: (Double, Double, Double, Double) = (0, 0, 0, 0)
+    var strokeStrengths: (Double, Double, Double, Double) = (1, 0, 0, 0)
+
+    init() {}
+
+    init(_ strike: LightningStrike) {
+        switch strike.kind {
+        case .bolt:    kind = .bolt
+        case .crawler: kind = .crawler
+        case .sheet:   kind = .sheet
+        }
+        distance = strike.distance
+        let first = strike.strokes.first?.time ?? 0
+        let count = min(strike.strokes.count, 4)
+        strokeCount = max(count, 1)
+        var times = [0.0, 0.0, 0.0, 0.0]
+        var strengths = [1.0, 0.0, 0.0, 0.0]
+        for index in 0..<count {
+            times[index] = strike.strokes[index].time - first
+            strengths[index] = strike.strokes[index].strength
+        }
+        strokeTimes = (times[0], times[1], times[2], times[3])
+        strokeStrengths = (strengths[0], strengths[1], strengths[2], strengths[3])
+    }
+
+    func stroke(_ index: Int) -> (time: Double, strength: Double) {
+        switch index {
+        case 0:  return (strokeTimes.0, strokeStrengths.0)
+        case 1:  return (strokeTimes.1, strokeStrengths.1)
+        case 2:  return (strokeTimes.2, strokeStrengths.2)
+        default: return (strokeTimes.3, strokeStrengths.3)
+        }
+    }
+}
+
 /// Fired on demand rather than free-running, so the flash on screen can lead
-/// the sound by the right amount. `distance` is 0 (overhead) to 1 (far off)
-/// and controls every other parameter at once.
+/// the sound by the right amount. The cue carries the strike the picture just
+/// drew: how far, what kind, and when each return stroke lit the channel.
 ///
-/// One strike is several sounds. Overhead it opens with a crack — the shock
-/// front, bright and over in a few tens of milliseconds — and then the body
-/// arrives as two to four peals, each a swell of filtered brown noise with
-/// its own wobble and its own place in the stereo field, staggered so the
-/// whole thing rolls rather than swells once and stops. A short feedback
-/// smear on the end keeps far strikes fading instead of switching off.
+/// One strike is several sounds, in order. Overhead it opens with the
+/// **cracks** — the shock front, bright and over in a few tens of
+/// milliseconds — one per return stroke, at the strike's own intervals, so a
+/// bolt that flickered three times cracks three times. Then the **tear**: a
+/// burst of noise whose pitch falls fast, the ripping-canvas sound only a
+/// close strike has. Then the body arrives as two to four **peals**, each a
+/// swell of filtered brown noise with its own wobble and its own place in the
+/// stereo field, staggered so the whole thing rolls rather than swells once
+/// and stops. A short feedback smear on the end keeps far strikes fading
+/// instead of switching off. A crawler skips the cracks and the tear and
+/// rolls long and wide; sheet lightning is the dull far body alone.
 ///
 /// Everything is allocated at init. Nothing here may allocate on the audio
 /// thread.
@@ -256,15 +332,51 @@ struct ThunderVoice {
         }
     }
 
+    /// One crack, waiting its turn. They share a band-pass; only the
+    /// envelopes are separate, since two can overlap by a few milliseconds.
+    private struct Crack {
+        var delay = 0
+        var env = 0.0
+        var attack = 0.0
+        var decay = 0.0
+        var amplitude = 0.0
+        var active = false
+
+        mutating func step() -> Double {
+            guard active else { return 0 }
+            if delay > 0 { delay -= 1; return 0 }
+            if attack > 0 {
+                env += attack
+                if env >= 1.0 { env = 1.0; attack = 0 }
+            } else {
+                env *= decay
+                if env < 0.0002 { env = 0; active = false; return 0 }
+            }
+            return env * amplitude
+        }
+    }
+
     private var rngL: Random, rngR: Random, rng: Random
     private var peals: [Peal]
+    private var cracks: [Crack]
 
-    // The crack: white noise through a band-pass, gone in a blink.
+    // The cracks: white noise through a band-pass, gone in a blink.
     private var crackBP = Biquad()
-    private var crackEnv = 0.0
-    private var crackDecay = 0.0
-    private var crackAttack = 0.0
-    private var crackActive = false
+
+    // The tear: noise through a resonant band-pass whose centre falls from
+    // bright to low over a few hundred milliseconds. Coefficients are
+    // recomputed in blocks — a sin and cos per sample is more than the rest
+    // of the voice put together.
+    private var tearBP = Biquad()
+    private var tearEnv = 0.0
+    private var tearDecay = 0.0
+    private var tearDelay = 0
+    private var tearFreq = 0.0
+    private var tearFreqRate = 1.0
+    private var tearFloor = 300.0
+    private var tearBlock = 0
+    private var tearActive = false
+    private static let tearBlockSize = 32
 
     // The smear: two short feedback delays, damped, one per side.
     private var smearL: [Double], smearR: [Double]
@@ -282,6 +394,7 @@ struct ThunderVoice {
         rngR = Random(seed: seed &+ 32)
         rng = Random(seed: seed &+ 34)
         peals = (0..<4).map { Peal(seed: seed &+ 40 &+ UInt64($0), sampleRate: sampleRate) }
+        cracks = Array(repeating: Crack(), count: 4)
         smearL = Array(repeating: 0, count: max(1, Int(sampleRate * 0.083)))
         smearR = Array(repeating: 0, count: max(1, Int(sampleRate * 0.097)))
         smearDampL.set(.lowpass, freq: 900, q: 0.7, sampleRate: sampleRate)
@@ -289,54 +402,94 @@ struct ThunderVoice {
     }
 
     var isIdle: Bool {
-        !crackActive && smearEnergy < 0.0002 && peals.allSatisfy { $0.isIdle }
+        !tearActive && smearEnergy < 0.0002
+            && cracks.allSatisfy { !$0.active } && peals.allSatisfy { $0.isIdle }
     }
 
-    mutating func strike(distance: Double) {
-        let d = min(max(distance, 0), 1)
+    mutating func strike(_ cue: ThunderCue) {
+        let d = min(max(cue.distance, 0), 1)
         let near = 1 - d
+        let crackling = cue.kind == .bolt && d < 0.45
 
-        // Only strikes close enough to see the bolt get the crack.
-        if d < 0.45 {
+        // The cracks: one per return stroke, at the strike's own spacing.
+        // The first is the loudest; the rest follow the strokes' strengths,
+        // so what you hear is the flicker you just saw.
+        if crackling {
             crackBP.set(.bandpass, freq: lerp(1400, 3200, near), q: 0.9, sampleRate: sampleRate)
             crackBP.reset()
-            crackAttack = 1.0 / (0.004 * sampleRate)
-            crackDecay = exp(-1.0 / (lerp(0.02, 0.05, near) * sampleRate))
-            crackEnv = 0.0001
-            crackActive = true
+        }
+        for index in 0..<cracks.count {
+            guard crackling, index < cue.strokeCount else { cracks[index].active = false; continue }
+            let stroke = cue.stroke(index)
+            var crack = Crack()
+            crack.delay = Int(stroke.time * sampleRate)
+            crack.attack = 1.0 / (0.004 * sampleRate)
+            crack.decay = exp(-1.0 / (lerp(0.02, 0.05, near) * (index == 0 ? 1.0 : 0.7) * sampleRate))
+            crack.amplitude = 0.9 * (index == 0 ? 1.0 : stroke.strength * 0.8)
+            crack.env = 0.0001
+            crack.active = true
+            cracks[index] = crack
         }
 
-        // Two peals far off, up to four overhead, each a little later, a
-        // little softer and a little duller than the first.
-        let count = 2 + Int((rng.range(0, 2) * near).rounded())
-        var start = d < 0.45 ? 0.03 : 0.0
+        // The tear: only a strike near enough to crack rips as well, and the
+        // nearer it is the higher it starts and the harder it falls.
+        if crackling && d < 0.35 {
+            let lastCrack = cue.stroke(min(cue.strokeCount, 4) - 1).time
+            tearDelay = Int((lastCrack + 0.012) * sampleRate)
+            tearFreq = lerp(1800, 3400, near)
+            tearFloor = lerp(420, 260, near)
+            let seconds = lerp(0.16, 0.34, near)
+            // Exponential glide from the start to the floor over the tear.
+            tearFreqRate = pow(tearFloor / tearFreq, 1.0 / (seconds * sampleRate / Double(Self.tearBlockSize)))
+            tearDecay = exp(-1.0 / (seconds * 0.9 * sampleRate))
+            tearBP.set(.bandpass, freq: tearFreq, q: 2.2, sampleRate: sampleRate)
+            tearBP.reset()
+            tearEnv = lerp(0.35, 0.8, near)
+            tearBlock = 0
+            tearActive = true
+        } else {
+            tearActive = false
+        }
+
+        // The body. Two peals far off, up to four overhead, each a little
+        // later, a little softer and a little duller than the first. A
+        // crawler always gets the full four, spread wider and further apart:
+        // a long roll that travels rather than a clap that swells.
+        let crawler = cue.kind == .crawler
+        let count = crawler ? 4 : 2 + Int((rng.range(0, 2) * near).rounded())
+        var start = crackling ? 0.03 + cue.stroke(min(cue.strokeCount, 4) - 1).time : 0.0
         for index in 0..<peals.count {
             guard index < count else { peals[index].active = false; continue }
             let first = index == 0
             var peal = peals[index]
             peal.delay = Int(start * sampleRate)
 
-            let cutoff = lerp(520, 90, d) * (first ? 1.0 : rng.range(0.6, 0.9))
+            var cutoff = lerp(520, 90, d) * (first ? 1.0 : rng.range(0.6, 0.9))
+            if crawler { cutoff *= 0.75 }
             peal.lpL.set(.lowpass, freq: cutoff, q: 0.7, sampleRate: sampleRate)
             peal.lpR.set(.lowpass, freq: cutoff * 0.94, q: 0.7, sampleRate: sampleRate)
 
-            let attack = first ? lerp(0.02, 0.28, d) : rng.range(0.08, 0.35)
-            let decaySeconds = lerp(1.0, 2.4, d) * rng.range(0.8, 1.3)
+            let attack = first && !crawler ? lerp(0.02, 0.28, d) : rng.range(0.08, 0.35) * (crawler ? 1.6 : 1.0)
+            let decaySeconds = lerp(1.0, 2.4, d) * rng.range(0.8, 1.3) * (crawler ? 1.5 : 1.0)
             peal.attackRate = 1.0 / (attack * sampleRate)
             peal.decay = exp(-1.0 / (decaySeconds * sampleRate))
             peal.amplitude = first ? lerp(1.0, 0.45, d) : lerp(0.7, 0.3, d) * rng.range(0.6, 1.0)
+            if crawler { peal.amplitude *= 0.8 }
             peal.subAmount = first ? lerp(0.9, 0.05, d) : lerp(0.5, 0.05, d)
 
-            let from = rng.range(0.25, 0.75), to = rng.range(0.2, 0.8)
-            peal.pan = from
-            peal.panRate = (to - from) / (lerp(3.5, 9.0, d) * sampleRate)
+            // A crawler crosses the sky, so its roll crosses the room.
+            let from = crawler ? rng.range(0.05, 0.3) : rng.range(0.25, 0.75)
+            let to = crawler ? rng.range(0.7, 0.95) : rng.range(0.2, 0.8)
+            peal.pan = crawler && index % 2 == 1 ? to : from
+            peal.panRate = ((crawler && index % 2 == 1 ? from : to) - peal.pan)
+                / (lerp(3.5, 9.0, d) * sampleRate)
 
             peal.attackRamp = 0.0001
             peal.env = 0
             peal.active = true
             peals[index] = peal
 
-            start += rng.range(0.35, 1.4) * lerp(0.7, 1.6, d)
+            start += rng.range(0.35, 1.4) * lerp(0.7, 1.6, d) * (crawler ? 1.4 : 1.0)
         }
     }
 
@@ -349,17 +502,33 @@ struct ThunderVoice {
             r += f.r
         }
 
-        if crackActive {
-            if crackEnv < 1.0 && crackAttack > 0 {
-                crackEnv += crackAttack
-                if crackEnv >= 1.0 { crackEnv = 1.0; crackAttack = 0 }
-            } else {
-                crackEnv *= crackDecay
-                if crackEnv < 0.0002 { crackEnv = 0; crackActive = false }
-            }
-            let c = crackBP.process(rngL.bipolar()) * crackEnv * 0.9
+        var crackGain = 0.0
+        for index in 0..<cracks.count where cracks[index].active {
+            crackGain += cracks[index].step()
+        }
+        if crackGain > 0 {
+            let c = crackBP.process(rngL.bipolar()) * crackGain
             l += c
             r += c
+        }
+
+        if tearActive {
+            if tearDelay > 0 {
+                tearDelay -= 1
+            } else {
+                tearBlock += 1
+                if tearBlock >= Self.tearBlockSize {
+                    tearBlock = 0
+                    tearFreq = max(tearFreq * tearFreqRate, tearFloor)
+                    tearBP.set(.bandpass, freq: tearFreq, q: 2.2, sampleRate: sampleRate)
+                }
+                tearEnv *= tearDecay
+                if tearEnv < 0.0002 { tearEnv = 0; tearActive = false }
+                // Slightly off-centre, the way a rip never sits still.
+                let t = tearBP.process(rngR.bipolar()) * tearEnv
+                l += t * 0.9
+                r += t * 1.1
+            }
         }
 
         // Smear: what came out a moment ago, damped, fed back in.
