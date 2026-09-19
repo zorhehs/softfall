@@ -130,12 +130,6 @@ final class RainLayer: CALayer {
     private func commonInit() {
         needsDisplayOnBoundsChange = false
         isOpaque = false
-        // Eight bits per channel, sRGB. Left to itself Core Animation gives a
-        // layer on a wide-gamut display a 16-bit backing store, and then
-        // every sprite blit — hundreds a frame — goes through a colour-managed
-        // conversion in vImage. The drops are pale blue-grey at half opacity;
-        // there is nothing in them that eight bits of sRGB cannot hold.
-        contentsFormat = .RGBA8Uint
         // Nothing here is implicitly animatable, and the one property that
         // changes every frame is `contents`. Refusing actions outright keeps a
         // stray implicit animation from ever queueing behind a frame.
@@ -152,8 +146,80 @@ final class RainLayer: CALayer {
 
         heightScale = max(size.height / Self.referenceHeight, 0.75)
         sprites = []
+        litSprites = []
         drops.removeAll(keepingCapacity: true)
         splashes.removeAll(keepingCapacity: true)
+        contents = nil
+        canvases = (0..<2).compactMap { _ in Canvas(size: size, scale: scale) }
+        canvasIndex = 0
+    }
+
+    /// The frame is drawn into pixels we own and handed to the layer as
+    /// `contents`, rather than through `draw(in:)`.
+    ///
+    /// Letting Core Animation supply the context looked simpler, and cost
+    /// most of what the rain cost. On a wide-gamut display the store it hands
+    /// out is sixteen bits per channel in the display's own space, so every
+    /// one of the several hundred sprite blits a frame was resampled at
+    /// sixteen bits and pushed through colour management on the CPU. These
+    /// contexts are eight-bit sRGB, the same space the sprites are built in
+    /// and the window is backed in, so a blit is a blit.
+    ///
+    /// Two of them, alternating. The image handed to the layer points
+    /// straight at the pixels — no copy — so the frame being drawn must not
+    /// be the one the compositor is still reading. `makeImage()` would have
+    /// avoided that by copying, but a copy-on-write of twenty megabytes on the
+    /// first touch of every frame cost more than the drawing did.
+    private var canvases: [Canvas] = []
+    private var canvasIndex = 0
+
+    private final class Canvas {
+        let context: CGContext
+        private let provider: CGDataProvider
+        private let pixels: UnsafeMutableRawPointer
+        private let width: Int, height: Int, bytesPerRow: Int
+
+        init?(size: CGSize, scale: CGFloat) {
+            let px = Int((size.width * scale).rounded(.up))
+            let py = Int((size.height * scale).rounded(.up))
+            guard px > 0, py > 0 else { return nil }
+            let bytesPerRow = px * 4
+            let byteCount = bytesPerRow * py
+            let pixels = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 64)
+            pixels.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount)
+
+            // BGRA, premultiplied, little-endian: what the compositor wants,
+            // so the upload is a copy rather than a swizzle.
+            let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+            guard let context = CGContext(data: pixels, width: px, height: py, bitsPerComponent: 8,
+                                          bytesPerRow: bytesPerRow, space: RainLayer.sRGB, bitmapInfo: info),
+                  let provider = CGDataProvider(dataInfo: nil, data: pixels, size: byteCount, releaseData: { _, _, _ in })
+            else { pixels.deallocate(); return nil }
+            context.scaleBy(x: scale, y: scale)
+            self.pixels = pixels
+            self.context = context
+            self.provider = provider
+            width = px; height = py; self.bytesPerRow = bytesPerRow
+        }
+
+        /// A fresh image object over the same pixels. Core Animation caches
+        /// what it has uploaded by image identity, so handing it the same
+        /// `CGImage` twice would show the old frame; a new wrapper each frame
+        /// costs an allocation and nothing else.
+        func makeImage() -> CGImage? {
+            let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                           bytesPerRow: bytesPerRow, space: RainLayer.sRGB,
+                           bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
+                           decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        }
+
+        deinit {
+            // Every image over these pixels has been released by now, and the
+            // compositor copied any frame it was shown at commit time, so
+            // nothing points here any more.
+            pixels.deallocate()
+        }
     }
 
     /// Fill the screen in one go rather than letting it arrive from the top
@@ -303,15 +369,20 @@ final class RainLayer: CALayer {
         advanceSplashes(step)
 
         if target == 0 && isIdle {
-            // Nothing left to draw. Drop the backing store so the last frame
-            // cannot flash back when the rain returns, and let the controller
-            // park the display link.
+            // Nothing left to draw. Drop the frame so it cannot flash back
+            // when the rain returns, and let the controller park the display
+            // link.
             isHidden = true
             contents = nil
             return
         }
 
-        setNeedsDisplay()
+        guard !canvases.isEmpty else { return }
+        canvasIndex = (canvasIndex + 1) % canvases.count
+        let canvas = canvases[canvasIndex]
+        canvas.context.clear(bounds)
+        paint(into: canvas.context)
+        contents = canvas.makeImage()
     }
 
     private func spawnSplash(at x: CGFloat, strength: CGFloat) {
@@ -347,7 +418,7 @@ final class RainLayer: CALayer {
 
     // MARK: Drawing
 
-    override func draw(in ctx: CGContext) {
+    private func paint(into ctx: CGContext) {
         guard bounds.height > 0 else { return }
         if sprites.isEmpty { buildSprites() }
         guard sprites.count == Self.bands.count, litSprites.count == Self.bands.count else { return }
