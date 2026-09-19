@@ -93,13 +93,17 @@ final class RainLayer: CALayer {
 
     var params = RainParams() {
         didSet {
-            if params.blue != oldValue.blue { sprites = [] }
+            if params.blue != oldValue.blue { sprites = []; litSprites = [] }
         }
     }
 
     private var drops: [Drop] = []
     private var splashes: [Splash] = []
     private var sprites: [CGImage] = []
+    /// The same drops, pale, for the frames a lightning strike lights them.
+    private var litSprites: [CGImage] = []
+    private var litSince: CFTimeInterval = -1
+    private var lit: CGFloat = 0
     private var heightScale: CGFloat = 1
     /// Reused between frames so retiring surplus drops allocates nothing.
     private var retired: [Int] = []
@@ -199,6 +203,33 @@ final class RainLayer: CALayer {
     }
 
     var isIdle: Bool { drops.isEmpty && splashes.isEmpty }
+
+    // MARK: Lightning
+
+    /// Brightness of the flash on the rain over time, in seconds from the
+    /// strike. Follows the bolt's own strokes, sampled a little coarser.
+    private static let litCurve: [(time: CFTimeInterval, value: CGFloat)] = [
+        (0, 0), (0.08, 1), (0.32, 0.6), (0.7, 0)
+    ]
+
+    /// A strike has just been drawn; catch it on the drops for the next few
+    /// frames. Rain lit by lightning goes pale and a little brighter — it is
+    /// what sells the bolt as being *in* the weather rather than over it.
+    func lightUp() {
+        litSince = CACurrentMediaTime()
+    }
+
+    private func sampleLit() -> CGFloat {
+        guard litSince >= 0 else { return 0 }
+        let t = CACurrentMediaTime() - litSince
+        let curve = Self.litCurve
+        guard t < curve[curve.count - 1].time else { litSince = -1; return 0 }
+        for i in 1..<curve.count where t <= curve[i].time {
+            let (t0, v0) = curve[i - 1], (t1, v1) = curve[i]
+            return v0 + (v1 - v0) * CGFloat((t - t0) / (t1 - t0))
+        }
+        return 0
+    }
 
     // MARK: Simulation
 
@@ -313,7 +344,8 @@ final class RainLayer: CALayer {
     override func draw(in ctx: CGContext) {
         guard bounds.height > 0 else { return }
         if sprites.isEmpty { buildSprites() }
-        guard sprites.count == Self.bands.count else { return }
+        guard sprites.count == Self.bands.count, litSprites.count == Self.bands.count else { return }
+        lit = sampleLit()
 
         // Every drop shares one velocity direction, so the rotation is computed
         // once. Rotating the sprite's tail axis (0, 1) by this angle lands it
@@ -338,7 +370,14 @@ final class RainLayer: CALayer {
             // The head sits at the origin and the tail runs back up the sprite,
             // so a drop is positioned by where its point is — which is also
             // where it has to be when it hits the floor.
-            ctx.draw(sprites[drop.band], in: CGRect(x: -wide * 0.5, y: 0, width: wide, height: len))
+            let rect = CGRect(x: -wide * 0.5, y: 0, width: wide, height: len)
+            ctx.draw(sprites[drop.band], in: rect)
+            if lit > 0.02 {
+                // Only while a strike is on screen — a second blit per drop
+                // for well under a second.
+                ctx.setAlpha(min(alpha + lit * 0.45, 1))
+                ctx.draw(litSprites[drop.band], in: rect)
+            }
             ctx.restoreGState()
         }
 
@@ -383,10 +422,14 @@ final class RainLayer: CALayer {
     }
 
     private func buildSprites() {
-        sprites = Self.bands.compactMap { makeSprite(for: $0) }
+        sprites = Self.bands.compactMap { makeSprite(for: $0, colour: dropColour()) }
+        litSprites = Self.bands.compactMap { makeSprite(for: $0, colour: Self.litColour) }
     }
 
-    private func makeSprite(for band: Band) -> CGImage? {
+    /// Lightning-lit rain: pale, faintly warm, whatever blue it was before.
+    private static let litColour: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.92, 0.93, 0.80)
+
+    private func makeSprite(for band: Band, colour c: (r: CGFloat, g: CGFloat, b: CGFloat)) -> CGImage? {
         // Sized generously against the largest destination rect a drop of this
         // band can ask for, so the blit is always a downscale.
         let pointWidth = band.width * 2.6 * 1.25
@@ -417,7 +460,6 @@ final class RainLayer: CALayer {
         path.addQuadCurve(to: CGPoint(x: 0.14, y: 0.80), control: CGPoint(x: 0.5, y: 1.0))
         path.closeSubpath()
 
-        let c = dropColour()
         let space = CGColorSpaceCreateDeviceRGB()
         let stops: [CGFloat] = [0, 0.45, 0.82, 0.95, 1.0]
         let alphas: [CGFloat] = [0, 0.22, 0.78, 1.0, 0.85]

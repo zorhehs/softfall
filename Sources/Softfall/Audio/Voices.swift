@@ -183,67 +183,194 @@ struct RainVoice {
 /// Fired on demand rather than free-running, so the flash on screen can lead
 /// the sound by the right amount. `distance` is 0 (overhead) to 1 (far off)
 /// and controls every other parameter at once.
+///
+/// One strike is several sounds. Overhead it opens with a crack — the shock
+/// front, bright and over in a few tens of milliseconds — and then the body
+/// arrives as two to four peals, each a swell of filtered brown noise with
+/// its own wobble and its own place in the stereo field, staggered so the
+/// whole thing rolls rather than swells once and stops. A short feedback
+/// smear on the end keeps far strikes fading instead of switching off.
+///
+/// Everything is allocated at init. Nothing here may allocate on the audio
+/// thread.
 struct ThunderVoice {
-    private var rngL: Random, rngR: Random
-    private var brownL = BrownNoise(), brownR = BrownNoise()
-    private var lpL = Biquad(), lpR = Biquad()
-    private var subL = Biquad(), subR = Biquad()
-    private var rumble: RandomWalk
-    private var env: Double = 0
-    private var attackRamp: Double = 0
-    private var attackRate: Double = 0
-    private var decay: Double = 0
-    private var amplitude: Double = 0
-    private var subAmount: Double = 0
+
+    /// One swell of the body.
+    private struct Peal {
+        var brownL = BrownNoise(), brownR = BrownNoise()
+        var lpL = Biquad(), lpR = Biquad()
+        var subL = Biquad(), subR = Biquad()
+        var wobble: RandomWalk
+        /// Samples still to wait before this peal begins.
+        var delay = 0
+        var env = 0.0
+        var attackRamp = 0.0
+        var attackRate = 0.0
+        var decay = 0.0
+        var amplitude = 0.0
+        var subAmount = 0.0
+        /// Stereo position, 0 left to 1 right, drifting over the peal.
+        var pan = 0.5
+        var panRate = 0.0
+        var active = false
+
+        var isIdle: Bool { !active }
+
+        init(seed: UInt64, sampleRate: Double) {
+            wobble = RandomWalk(seed: seed, lo: 0.35, hi: 1.0, minSeconds: 0.18, maxSeconds: 0.85, sampleRate: sampleRate)
+            subL.set(.lowpass, freq: 48, q: 0.8, sampleRate: sampleRate)
+            subR.set(.lowpass, freq: 46, q: 0.8, sampleRate: sampleRate)
+        }
+
+        mutating func render(rngL: inout Random, rngR: inout Random) -> Frame {
+            guard active else { return (0, 0) }
+            if delay > 0 { delay -= 1; return (0, 0) }
+
+            if attackRamp > 0 {
+                attackRamp += attackRate
+                env = min(attackRamp, 1.0)
+                if attackRamp >= 1.0 { attackRamp = 0 }
+            } else {
+                env *= decay
+                if env < 0.0002 { env = 0; active = false; return (0, 0) }
+            }
+
+            // The wobble is what separates thunder from a whoosh.
+            let e = env * amplitude * wobble.step()
+
+            let nl = brownL.process(rngL.bipolar())
+            let nr = brownR.process(rngR.bipolar())
+
+            var l = lpL.process(nl) * e
+            var r = lpR.process(nr) * e
+            l += subL.process(nl) * e * subAmount * 1.4
+            r += subR.process(nr) * e * subAmount * 1.4
+
+            // Half the peal is a mono centre that pans, equal-power, and
+            // drifts; the other half stays wide. A roll that moves across the
+            // room reads as a front passing over rather than a speaker.
+            pan = min(max(pan + panRate, 0), 1)
+            let angle = pan * Double.pi * 0.5
+            let mono = (l + r) * 0.5
+            return (mono * cos(angle) * 0.9 + l * 0.5, mono * sin(angle) * 0.9 + r * 0.5)
+        }
+    }
+
+    private var rngL: Random, rngR: Random, rng: Random
+    private var peals: [Peal]
+
+    // The crack: white noise through a band-pass, gone in a blink.
+    private var crackBP = Biquad()
+    private var crackEnv = 0.0
+    private var crackDecay = 0.0
+    private var crackAttack = 0.0
+    private var crackActive = false
+
+    // The smear: two short feedback delays, damped, one per side.
+    private var smearL: [Double], smearR: [Double]
+    private var smearIndexL = 0, smearIndexR = 0
+    private var smearDampL = Biquad(), smearDampR = Biquad()
+    private var smearEnergy = 0.0
+    private static let smearFeedback = 0.58
+    private static let smearMix = 0.38
+
     private let sampleRate: Double
 
     init(sampleRate: Double, seed: UInt64) {
         self.sampleRate = sampleRate
         rngL = Random(seed: seed &+ 31)
         rngR = Random(seed: seed &+ 32)
-        rumble = RandomWalk(seed: seed &+ 33, lo: 0.35, hi: 1.0, minSeconds: 0.18, maxSeconds: 0.85, sampleRate: sampleRate)
-        subL.set(.lowpass, freq: 48, q: 0.8, sampleRate: sampleRate)
-        subR.set(.lowpass, freq: 46, q: 0.8, sampleRate: sampleRate)
+        rng = Random(seed: seed &+ 34)
+        peals = (0..<4).map { Peal(seed: seed &+ 40 &+ UInt64($0), sampleRate: sampleRate) }
+        smearL = Array(repeating: 0, count: max(1, Int(sampleRate * 0.083)))
+        smearR = Array(repeating: 0, count: max(1, Int(sampleRate * 0.097)))
+        smearDampL.set(.lowpass, freq: 900, q: 0.7, sampleRate: sampleRate)
+        smearDampR.set(.lowpass, freq: 860, q: 0.7, sampleRate: sampleRate)
     }
 
-    var isIdle: Bool { env < 0.0002 && attackRamp <= 0 }
+    var isIdle: Bool {
+        !crackActive && smearEnergy < 0.0002 && peals.allSatisfy { $0.isIdle }
+    }
 
     mutating func strike(distance: Double) {
         let d = min(max(distance, 0), 1)
-        let cutoff = lerp(460, 85, d)
-        lpL.set(.lowpass, freq: cutoff, q: 0.7, sampleRate: sampleRate)
-        lpR.set(.lowpass, freq: cutoff * 0.94, q: 0.7, sampleRate: sampleRate)
-        attackRate = 1.0 / (lerp(0.018, 0.30, d) * sampleRate)
-        decay = exp(-1.0 / (lerp(2.4, 8.5, d) * sampleRate))
-        amplitude = lerp(1.0, 0.42, d)
-        subAmount = lerp(0.9, 0.05, d)
-        attackRamp = 0.0001
-        env = 0
+        let near = 1 - d
+
+        // Only strikes close enough to see the bolt get the crack.
+        if d < 0.45 {
+            crackBP.set(.bandpass, freq: lerp(1400, 3200, near), q: 0.9, sampleRate: sampleRate)
+            crackBP.reset()
+            crackAttack = 1.0 / (0.004 * sampleRate)
+            crackDecay = exp(-1.0 / (lerp(0.02, 0.05, near) * sampleRate))
+            crackEnv = 0.0001
+            crackActive = true
+        }
+
+        // Two peals far off, up to four overhead, each a little later, a
+        // little softer and a little duller than the first.
+        let count = 2 + Int((rng.range(0, 2) * near).rounded())
+        var start = d < 0.45 ? 0.03 : 0.0
+        for index in 0..<peals.count {
+            guard index < count else { peals[index].active = false; continue }
+            let first = index == 0
+            var peal = peals[index]
+            peal.delay = Int(start * sampleRate)
+
+            let cutoff = lerp(520, 90, d) * (first ? 1.0 : rng.range(0.6, 0.9))
+            peal.lpL.set(.lowpass, freq: cutoff, q: 0.7, sampleRate: sampleRate)
+            peal.lpR.set(.lowpass, freq: cutoff * 0.94, q: 0.7, sampleRate: sampleRate)
+
+            let attack = first ? lerp(0.02, 0.28, d) : rng.range(0.08, 0.35)
+            let decaySeconds = lerp(1.0, 2.4, d) * rng.range(0.8, 1.3)
+            peal.attackRate = 1.0 / (attack * sampleRate)
+            peal.decay = exp(-1.0 / (decaySeconds * sampleRate))
+            peal.amplitude = first ? lerp(1.0, 0.45, d) : lerp(0.7, 0.3, d) * rng.range(0.6, 1.0)
+            peal.subAmount = first ? lerp(0.9, 0.05, d) : lerp(0.5, 0.05, d)
+
+            let from = rng.range(0.25, 0.75), to = rng.range(0.2, 0.8)
+            peal.pan = from
+            peal.panRate = (to - from) / (lerp(3.5, 9.0, d) * sampleRate)
+
+            peal.attackRamp = 0.0001
+            peal.env = 0
+            peal.active = true
+            peals[index] = peal
+
+            start += rng.range(0.35, 1.4) * lerp(0.7, 1.6, d)
+        }
     }
 
     mutating func render() -> Frame {
-        if attackRamp > 0 {
-            attackRamp += attackRate
-            env = min(attackRamp, 1.0)
-            if attackRamp >= 1.0 { attackRamp = 0 }
-        } else {
-            env *= decay
-            if env < 0.0002 { env = 0; return (0, 0) }
+        var l = 0.0, r = 0.0
+
+        for index in 0..<peals.count where peals[index].active {
+            let f = peals[index].render(rngL: &rngL, rngR: &rngR)
+            l += f.l
+            r += f.r
         }
 
-        // The wobble is what separates thunder from a whoosh.
-        let wob = rumble.step()
-        let e = env * amplitude * wob
+        if crackActive {
+            if crackEnv < 1.0 && crackAttack > 0 {
+                crackEnv += crackAttack
+                if crackEnv >= 1.0 { crackEnv = 1.0; crackAttack = 0 }
+            } else {
+                crackEnv *= crackDecay
+                if crackEnv < 0.0002 { crackEnv = 0; crackActive = false }
+            }
+            let c = crackBP.process(rngL.bipolar()) * crackEnv * 0.9
+            l += c
+            r += c
+        }
 
-        let nl = brownL.process(rngL.bipolar())
-        let nr = brownR.process(rngR.bipolar())
+        // Smear: what came out a moment ago, damped, fed back in.
+        let dl = smearL[smearIndexL], dr = smearR[smearIndexR]
+        smearL[smearIndexL] = smearDampL.process(l + dl * Self.smearFeedback)
+        smearR[smearIndexR] = smearDampR.process(r + dr * Self.smearFeedback)
+        smearIndexL += 1; if smearIndexL >= smearL.count { smearIndexL = 0 }
+        smearIndexR += 1; if smearIndexR >= smearR.count { smearIndexR = 0 }
+        smearEnergy = abs(dl) + abs(dr)
 
-        var l = lpL.process(nl) * e
-        var r = lpR.process(nr) * e
-        l += subL.process(nl) * e * subAmount * 1.4
-        r += subR.process(nr) * e * subAmount * 1.4
-
-        return (l * 0.85, r * 0.85)
+        return ((l + dl * Self.smearMix) * 0.85, (r + dr * Self.smearMix) * 0.85)
     }
 }
 
