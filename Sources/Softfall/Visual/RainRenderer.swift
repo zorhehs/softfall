@@ -130,6 +130,12 @@ final class RainLayer: CALayer {
     private func commonInit() {
         needsDisplayOnBoundsChange = false
         isOpaque = false
+        // Eight bits per channel, sRGB. Left to itself Core Animation gives a
+        // layer on a wide-gamut display a 16-bit backing store, and then
+        // every sprite blit — hundreds a frame — goes through a colour-managed
+        // conversion in vImage. The drops are pale blue-grey at half opacity;
+        // there is nothing in them that eight bits of sRGB cannot hold.
+        contentsFormat = .RGBA8Uint
         // Nothing here is implicitly animatable, and the one property that
         // changes every frame is `contents`. Refusing actions outright keeps a
         // stray implicit animation from ever queueing behind a frame.
@@ -426,6 +432,8 @@ final class RainLayer: CALayer {
         litSprites = Self.bands.compactMap { makeSprite(for: $0, colour: Self.litColour) }
     }
 
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
     /// Lightning-lit rain: pale, faintly warm, whatever blue it was before.
     private static let litColour: (r: CGFloat, g: CGFloat, b: CGFloat) = (0.92, 0.93, 0.80)
 
@@ -437,13 +445,19 @@ final class RainLayer: CALayer {
         let px = max(2, Int((pointWidth * contentsScale * 2).rounded(.up)))
         let py = max(2, Int((pointLength * contentsScale).rounded(.up)))
 
+        // The sprite is built in the same colour space the layer's backing
+        // store uses, so drawing it is a copy rather than a conversion. In
+        // DeviceRGB — the display's own profile — each blit was being pushed
+        // through the colour-management pipeline, and that was most of what
+        // the rain cost.
+        let space = Self.sRGB
         guard let ctx = CGContext(
             data: nil,
             width: px,
             height: py,
             bitsPerComponent: 8,
             bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: space,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
@@ -460,7 +474,6 @@ final class RainLayer: CALayer {
         path.addQuadCurve(to: CGPoint(x: 0.14, y: 0.80), control: CGPoint(x: 0.5, y: 1.0))
         path.closeSubpath()
 
-        let space = CGColorSpaceCreateDeviceRGB()
         let stops: [CGFloat] = [0, 0.45, 0.82, 0.95, 1.0]
         let alphas: [CGFloat] = [0, 0.22, 0.78, 1.0, 0.85]
         let colors = alphas.map { CGColor(colorSpace: space, components: [c.r, c.g, c.b, $0])! }

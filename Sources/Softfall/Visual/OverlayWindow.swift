@@ -31,6 +31,13 @@ final class OverlayWindow: NSWindow {
         // attention. It is scenery, not a window.
         animationBehavior = .none
         sharingType = .none
+        // Everything drawn here is specified in sRGB, so back the window in
+        // sRGB too. Left at the display's own profile — Display P3 on any
+        // recent Mac — each layer is redrawn in 16 bits per channel and every
+        // one of the rain's sprite blits is pushed through colour management
+        // on the CPU. The compositor converts the finished frame to the panel
+        // on the GPU, which costs nothing and looks the same.
+        colorSpace = .sRGB
 
         let view = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         view.wantsLayer = true
