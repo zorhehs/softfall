@@ -24,7 +24,15 @@ final class LightningLayer: CALayer {
     private static let outer = CGColor(red: 1.00, green: 0.76, blue: 0.20, alpha: 1)
 
     /// Beyond this the strike is behind cloud: a bloom, no visible bolt.
-    private static let boltVisibleWithin: Double = 0.62
+    ///
+    /// This was 0.62, chosen without checking it against the distance the
+    /// director actually picks — which is `1 - level ... 1`. The two ranges
+    /// barely overlapped: at the default level a bolt appeared about once
+    /// every ninety seconds, and below a level of 0.38 no bolt could ever be
+    /// drawn at all, because every strike was classified as behind cloud.
+    /// Now most strikes draw one, and distance decides how strong it is
+    /// rather than whether it exists.
+    private static let boltVisibleWithin: Double = 0.88
 
     private var path: CGPath?
     private var strength: CGFloat = 1
