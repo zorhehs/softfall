@@ -12,6 +12,12 @@
 #          identifier, its own saved settings, and only your machine's
 #          architecture so it takes seconds rather than minutes.
 #
+# In-app updates need two things in Info.plist that only a release has: the
+# feed URL and the public half of the Sparkle signing key. The key comes from
+# the SPARKLE_PUBLIC_ED_KEY environment variable (the release workflow sets it
+# from a repository secret). Without it the app still builds and runs; it just
+# has no updater — the menu item and the settings section stay hidden.
+#
 # The point of --dev is that a source build and an installed copy used to share
 # the identifier io.github.zorhehs.softfall. macOS then treats them as one app,
 # so `open -a Softfall` picks whichever it likes and you cannot tell which
@@ -72,7 +78,21 @@ if [[ -z "$BINARY" ]]; then
 fi
 
 echo "==> Assembling the bundle"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+
+# Sparkle is a dynamic framework; SwiftPM links against it but does not put it
+# anywhere. The binary carries an rpath of @executable_path/../Frameworks (see
+# Package.swift), so it goes here. The XPC services and the Autoupdate helper
+# it needs to replace a running app live inside the framework bundle.
+SPARKLE=""
+for candidate in .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-*/Sparkle.framework; do
+    if [[ -d "$candidate" ]]; then SPARKLE="$candidate"; break; fi
+done
+if [[ -z "$SPARKLE" ]]; then
+    echo "error: Sparkle.framework not found under .build/artifacts — did swift build resolve packages?" >&2
+    exit 1
+fi
+cp -R "$SPARKLE" "$APP/Contents/Frameworks/"
 
 # Keep local builds out of Spotlight so a dev copy never clutters search.
 : > "$ROOT/dist/.metadata_never_index"
@@ -92,6 +112,20 @@ do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
+
+# The updater's feed and key. A dev copy never gets them: it would otherwise
+# offer to replace itself with the latest release, which is the one thing a
+# dev copy is for not being.
+SPARKLE_KEYS=""
+if [[ $DEV -eq 0 && -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
+    SPARKLE_KEYS="    <key>SUFeedURL</key><string>https://github.com/zorhehs/softfall/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_ED_KEY</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>"
+    echo "==> Updater enabled"
+else
+    echo "==> Updater disabled (no SPARKLE_PUBLIC_ED_KEY)"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -113,6 +147,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
          and menu bar, plus a status item. Adding LSUIElement back here would
          fight main.swift's .regular activation policy. -->
     <key>NSHumanReadableCopyright</key><string>MIT licensed</string>
+$SPARKLE_KEYS
 </dict>
 </plist>
 PLIST

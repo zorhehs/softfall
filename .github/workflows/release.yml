@@ -40,7 +40,17 @@ jobs:
           # and notarised build; without them the app is ad-hoc signed and the
           # cask clears the quarantine flag on install instead.
           CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
-        run: Scripts/build-app.sh "${{ steps.version.outputs.version }}"
+          # The public half of the Sparkle signing key. Baked into Info.plist
+          # so the app can verify what it downloads. Without it the release
+          # has no in-app updater at all (the menu item is simply absent), so
+          # the step below fails loudly rather than shipping one silently.
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PUBLIC_ED_KEY" ]; then
+            echo "::error::SPARKLE_PUBLIC_ED_KEY is not set. Run generate_keys once (see README, In-app updates) and add both halves as repository secrets." >&2
+            exit 1
+          fi
+          Scripts/build-app.sh "${{ steps.version.outputs.version }}"
 
       - name: Package
         id: package
@@ -55,6 +65,32 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "sha256 = $SHA"
 
+      # Sparkle's feed: one XML file naming the newest release, its download
+      # URL, and an EdDSA signature over the archive. The app reads it from
+      # .../releases/latest/download/appcast.xml, which GitHub redirects to
+      # whichever release is newest, so the feed is attached to every release
+      # and no other hosting is needed.
+      - name: Write the update feed
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [ -z "$SPARKLE_PRIVATE_ED_KEY" ]; then
+            echo "::error::SPARKLE_PRIVATE_ED_KEY is not set." >&2
+            exit 1
+          fi
+          GENERATE_APPCAST=$(ls .build/artifacts/sparkle/Sparkle/bin/generate_appcast)
+          mkdir -p feed
+          cp "${{ steps.package.outputs.archive }}" feed/
+          # The key arrives on stdin so it never touches the filesystem or the
+          # process list.
+          echo "$SPARKLE_PRIVATE_ED_KEY" | "$GENERATE_APPCAST" --ed-key-file - \
+            --download-url-prefix "https://github.com/zorhehs/softfall/releases/download/v$VERSION/" \
+            --link "https://github.com/zorhehs/softfall/releases" \
+            feed
+          echo "--- appcast ---"
+          cat feed/appcast.xml
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,8 +99,8 @@ jobs:
           gh release create "v$VERSION" \
             --title "Softfall $VERSION" \
             --generate-notes \
-            "${{ steps.package.outputs.archive }}" \
-            || gh release upload "v$VERSION" "${{ steps.package.outputs.archive }}" --clobber
+            "${{ steps.package.outputs.archive }}" feed/appcast.xml \
+            || gh release upload "v$VERSION" "${{ steps.package.outputs.archive }}" feed/appcast.xml --clobber
 
       - name: Point the cask at this release
         run: |

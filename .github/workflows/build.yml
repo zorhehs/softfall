@@ -35,6 +35,7 @@ jobs:
           test -x "$APP/Contents/MacOS/Softfall"
           test -f "$APP/Contents/Info.plist"
           test -f "$APP/Contents/Resources/AppIcon.icns"
+          test -d "$APP/Contents/Frameworks/Sparkle.framework"
           echo "--- architectures ---"
           lipo -info "$APP/Contents/MacOS/Softfall"
           echo "--- signature ---"

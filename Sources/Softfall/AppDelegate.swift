@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preview: ScenePreview!
     private var appMenu: AppMenuController!
     private var settings: SettingsWindowController!
+    private var updater: Updater!
     private var tickTimer: Timer?
     private var lastSceneKey: String?
     private var lastSuspend: Bool?
@@ -41,7 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.isDucked = self.ducker.isDucking
         }
 
-        settings = SettingsWindowController(state: state)
+        // Started before the windows exist so the launch check is already on
+        // its way by the time there is anything to look at.
+        updater = Updater()
+
+        settings = SettingsWindowController(state: state, updater: updater)
         preview = ScenePreview(state: state)
         window = MainWindowController(state: state, preview: preview) { [weak self] in self?.settings.show() }
         // The window's copy of the sky flashes in the same instant as the desktop.
@@ -58,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appMenu = AppMenuController(
             state: state,
+            updater: updater,
             onShowWindow: { [weak self] in self?.window.show() },
             onShowSettings: { [weak self] in self?.settings.show() }
         )

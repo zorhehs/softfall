@@ -13,7 +13,7 @@ final class SettingsWindowController {
 
     private let window: NSWindow
 
-    init(state: MixState) {
+    init(state: MixState, updater: Updater) {
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 470, height: 340),
             styleMask: [.titled, .closable],
@@ -22,7 +22,7 @@ final class SettingsWindowController {
         )
         window.title = "Softfall Settings"
         window.isReleasedWhenClosed = false
-        window.contentViewController = NSHostingController(rootView: SettingsView(state: state))
+        window.contentViewController = NSHostingController(rootView: SettingsView(state: state, updater: updater))
         window.center()
     }
 
