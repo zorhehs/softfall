@@ -37,6 +37,12 @@ fi
 
 echo "==> Assembling the bundle"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+# Keep local builds out of Spotlight. A source build and an installed copy share
+# a bundle identifier, so LaunchServices treats them as the same app and picks
+# between them on its own terms — which means `open -a Softfall` can silently
+# launch the wrong one. Launch test builds by path instead: open dist/Softfall.app
+: > "$ROOT/dist/.metadata_never_index"
 cp "$BINARY" "$APP/Contents/MacOS/Softfall"
 chmod +x "$APP/Contents/MacOS/Softfall"
 
