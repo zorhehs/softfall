@@ -135,7 +135,10 @@ final class MixState: ObservableObject {
         var d = current.level * scene.weight(for: layer)
         if calmMode { d *= 0.45 }
         if powerSaving { d *= 0.5 }
-        return d
+        // The sleep timer fades the sound over its last two minutes; the
+        // picture thins with it, so the rain moves on rather than being cut
+        // off mid-fall the moment the sound reaches zero.
+        return d * fadeMultiplier
     }
 
     /// The level fed to a layer's synthesiser as a timbre control, independent
