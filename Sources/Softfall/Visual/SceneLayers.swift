@@ -282,14 +282,17 @@ final class SceneLayers {
         if strike.leaderDuration > 0 {
             keyframes.append((strike.leaderDuration - 0.004, peak * 0.08))
         }
+        // Held for a few frames, as the bolt is: a sky that lights for
+        // thirty milliseconds at thirty frames a second is a sky that
+        // usually does not light at all.
         for s in strike.strokes {
             let v = peak * Float(s.strength * stroke)
             keyframes.append((s.time, v))
-            keyframes.append((s.time + 0.03, v * 0.35))
-            keyframes.append((s.time + 0.06, v * 0.15))
+            keyframes.append((s.time + 0.06, v * 0.8))
+            keyframes.append((s.time + 0.16, v * 0.3))
         }
         let last = strike.strokes.last?.time ?? 0
-        keyframes.append((last + 0.35, peak * 0.06))
+        keyframes.append((last + 0.5, peak * 0.08))
         keyframes.append((strike.duration + d * 0.4, 0))
 
         let animation = CAKeyframeAnimation(keyPath: "opacity")

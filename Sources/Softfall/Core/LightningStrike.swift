@@ -89,14 +89,18 @@ struct LightningStrike {
         switch kind {
         case .bolt:
             // The leader is dim and quick; a near strike has more strokes,
-            // spaced tens of milliseconds apart, each a little weaker.
+            // each a little weaker. They are spaced a tenth of a second or so
+            // apart — further than the real thing, which is tens of
+            // milliseconds, because a stroke has to last a few frames to be
+            // seen at all, and strokes closer together than that merge into
+            // one.
             leader = Double.random(in: 0.04...0.12, using: &rng)
             let count = 1 + Int(Double.random(in: 0..<(1.4 + near * 2.6), using: &rng))
             var t = leader
             var strength = 1.0
             for index in 0..<min(count, 4) {
                 strokes.append(ReturnStroke(time: t, strength: strength))
-                t += Double.random(in: 0.035...0.095, using: &rng)
+                t += Double.random(in: 0.09...0.18, using: &rng)
                 strength = index == 0
                     ? Double.random(in: 0.55...0.9, using: &rng)
                     : strength * Double.random(in: 0.7...0.95, using: &rng)

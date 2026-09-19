@@ -71,9 +71,11 @@ final class LightningLayer: CALayer {
 
         // The glow is a wide, faint warm stroke with a wider, fainter shadow
         // of itself — two passes for the price of one layer.
-        glowLayer.strokeColor = Self.glow.copy(alpha: 0.22)
+        // Sized against the preview that was signed off: wide enough to
+        // read as a glow from across the room, not a hairline.
+        glowLayer.strokeColor = Self.glow.copy(alpha: 0.30)
         glowLayer.shadowColor = Self.halo
-        glowLayer.shadowOpacity = 0.55
+        glowLayer.shadowOpacity = 0.75
 
         coreLayer.strokeColor = Self.core
         coreLayer.shadowColor = Self.inner
@@ -133,16 +135,16 @@ final class LightningLayer: CALayer {
         }
 
         glowLayer.path = channel
-        glowLayer.lineWidth = 14 * strength
-        glowLayer.shadowRadius = 14 * strength
+        glowLayer.lineWidth = 20 * strength
+        glowLayer.shadowRadius = 22 * strength
 
         coreLayer.path = channel
-        coreLayer.lineWidth = max(1.7 * strength, 0.8)
-        coreLayer.shadowRadius = 4.5 * strength
+        coreLayer.lineWidth = max(2.4 * strength, 1.0)
+        coreLayer.shadowRadius = 7 * strength
 
         forkLayer.path = forks
-        forkLayer.lineWidth = max(1.1 * strength, 0.6)
-        forkLayer.shadowRadius = 5 * strength
+        forkLayer.lineWidth = max(1.8 * strength, 0.8)
+        forkLayer.shadowRadius = 7 * strength
 
         isHidden = false
         removeAllAnimations()
@@ -169,27 +171,33 @@ final class LightningLayer: CALayer {
         // The strokes: a keyframe per return stroke, from the strike itself.
         // The channel sits at leader brightness until the first one, holds a
         // dimmer afterglow between them, then fades rather than cuts.
+        //
+        // Each stroke is held at full brightness for sixty milliseconds. A
+        // real return stroke is over in a tenth of that, but the screen is
+        // repainted every thirty-three, and a flash shorter than a frame is
+        // a flash that mostly lands between two of them: what reached the
+        // eye was the afterglow and nothing else.
         let leaderGlow = peak * Float(0.10 + nearness * 0.10)
-        let between = peak * Float(0.06 + nearness * 0.08)
+        let between = peak * Float(0.10 + nearness * 0.12)
         var keyframes: [(time: Double, value: Float)] = [(0, leaderGlow * 0.6), (max(leader - 0.004, 0.001), leaderGlow)]
         for stroke in strike.strokes {
             let v = peak * Float(stroke.strength)
             keyframes.append((stroke.time, v))
-            keyframes.append((stroke.time + 0.018, v * 0.72))
-            keyframes.append((stroke.time + 0.045, between))
+            keyframes.append((stroke.time + 0.06, v * 0.85))
+            keyframes.append((stroke.time + 0.14, max(between, v * 0.3)))
         }
         let last = strike.strokes.last?.time ?? leader
-        keyframes.append((last + 0.20, between * 0.7))
-        keyframes.append((last + 0.55, between * 0.25))
+        keyframes.append((last + 0.25, between))
+        keyframes.append((last + 0.70, between * 0.6))
         keyframes.append((strike.duration, 0))
         add(Self.flicker(keyframes, duration: strike.duration), forKey: "strike")
 
         // The forks: lit by the first stroke, and gone with it. Crawlers are
         // the exception — their fingers are the whole show and linger.
-        let forkHold = strike.kind == .crawler ? 0.30 : 0.10
+        let forkHold = strike.kind == .crawler ? 0.40 : 0.22
         let forkKeys: [(time: Double, value: Float)] = [
             (0, 0), (max(first.time - 0.003, 0), 0), (first.time, 1),
-            (first.time + forkHold * 0.4, 0.55), (first.time + forkHold, 0), (strike.duration, 0)
+            (first.time + forkHold * 0.4, 0.6), (first.time + forkHold, 0), (strike.duration, 0)
         ]
         forkLayer.add(Self.flicker(forkKeys, duration: strike.duration), forKey: "forks")
 
