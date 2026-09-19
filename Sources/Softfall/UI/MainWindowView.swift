@@ -1,88 +1,144 @@
 import SwiftUI
 
-/// The main window: the four things you actually touch.
+/// The main window: the weather, edge to edge, with the four things you
+/// actually touch laid over it.
 ///
-/// This window had sixteen controls in it. Placement, opacity, colour, tone,
-/// frame rate, display choices, ducking, battery and login behaviour are all
-/// things you set once and then forget, and putting them in front of someone
-/// every time they want to turn the rain down is how a small app starts
-/// feeling like a control panel. They live in Settings now, behind Command-,
-/// where the platform has trained everyone to look for them.
-///
-/// What is left is the instrument: which weather, whether it is running, how
-/// much of it, and how loud.
+/// The picture is the same renderer that paints the desktop, so the window is
+/// not a control panel *about* the weather — it is a piece of it. Everything
+/// drawn over the top is kept thin and white so the scene stays the subject:
+/// three words to choose a scene, one italic word to name it, a ring for
+/// play/pause, two hairlines for amount and volume.
 struct MainWindowView: View {
     @ObservedObject var state: MixState
+    let preview: ScenePreview
     var onOpenSettings: () -> Void
 
-    /// A segmented picker wants a plain binding; selecting a scene also starts
-    /// playback, which `select(_:)` already handles.
-    private var scene: Binding<Scene> {
-        Binding(get: { state.scene }, set: { state.select($0) })
+    var body: some View {
+        ZStack {
+            Sky(scene: state.scene)
+            ScenePreviewRepresentable(preview: preview)
+            scrim
+            // The fire's glow is part of the scene, not the sky, and it rises
+            // from the bottom edge — exactly where the scrim is darkest. So it
+            // goes over the scrim, at the strength that reads through the text.
+            FireGlow(visible: state.scene == .campfire)
+            controls
+        }
+        .frame(minWidth: 320, minHeight: 520)
+        .preferredColorScheme(.dark)
+        .ignoresSafeArea()
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Picker("", selection: scene) {
-                ForEach(Scene.allCases) { scene in
-                    Text(scene.title).tag(scene)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+    // MARK: Layers
 
-            transport
+    /// Darkens the lower half so white type reads over bright rain. Starts
+    /// clear a little above the title and settles near-black at the bottom.
+    private var scrim: some View {
+        VStack(spacing: 0) {
+            Color.clear
+            LinearGradient(
+                stops: [
+                    .init(color: Color(red: 0.02, green: 0.03, blue: 0.055).opacity(0), location: 0),
+                    .init(color: Color(red: 0.02, green: 0.03, blue: 0.055).opacity(0.6), location: 0.45),
+                    .init(color: Color(red: 0.02, green: 0.03, blue: 0.055).opacity(0.8), location: 1)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 260)
+        }
+        .allowsHitTesting(false)
+    }
 
-            // `.columns` aligns the two labels without the grouped boxes a
-            // settings pane wants — the same alignment, none of the furniture.
-            Form {
-                Slider(
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sceneTabs
+                // Leaves room for the traffic lights, which sit over the scene.
+                .padding(.top, 36)
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
+
+            nowPlaying
+
+            VStack(spacing: 14) {
+                HairlineSlider(
+                    label: "Amount",
                     value: Binding(
                         get: { state.current.level },
                         set: { v in state.updateCurrent { $0.level = v } }
                     ),
                     in: 0.02...1
-                ) {
-                    Text("Amount")
-                }
-
-                Slider(value: $state.masterVolume, in: 0...1) {
-                    Text("Volume")
-                }
+                )
+                HairlineSlider(label: "Volume", value: $state.masterVolume, in: 0...1)
             }
-            .formStyle(.columns)
+            .padding(.top, 22)
+
+            footer
+                .padding(.top, 22)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
+        .foregroundStyle(.white)
+    }
+
+    // MARK: Pieces
+
+    private var sceneTabs: some View {
+        HStack(spacing: 22) {
+            ForEach(Scene.allCases) { scene in
+                let selected = scene == state.scene
+                Button {
+                    state.select(scene)
+                } label: {
+                    Text(scene.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(selected ? 1 : 0.55))
+                        .padding(.vertical, 4)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .frame(height: 1.5)
+                                .foregroundStyle(selected ? .white : .clear)
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var nowPlaying: some View {
+        HStack(alignment: .bottom, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(state.scene.title)
+                    .font(.system(size: 46, weight: .light, design: .serif))
+                    .italic()
+                    .lineLimit(1)
+                Text(statusLine)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 0)
 
-            footer
-        }
-        .padding(18)
-        .frame(minWidth: 340, minHeight: 300)
-    }
-
-    private var transport: some View {
-        HStack(spacing: 12) {
             Button {
                 state.isPlaying.toggle()
             } label: {
-                Image(systemName: state.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(state.isPlaying ? Color.accentColor : Color.secondary)
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.08))
+                    Circle()
+                        .strokeBorder(.white.opacity(0.7), lineWidth: 1.5)
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 17, weight: .medium))
+                        .offset(x: state.isPlaying ? 0 : 1.5)
+                }
+                .frame(width: 46, height: 46)
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help(state.isPlaying ? "Pause" : "Resume")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.scene.title)
-                    .font(.headline)
-                Text(statusLine)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
+            .padding(.bottom, 4)
         }
     }
 
@@ -98,16 +154,20 @@ struct MainWindowView: View {
                 }
             } label: {
                 Label(state.sleepTimerEndsAt == nil ? "Sleep timer" : "Timer on", systemImage: "moon.zzz")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.8))
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
 
             Spacer()
 
             Button("Settings…", action: onOpenSettings)
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.8))
         }
-        .font(.subheadline)
     }
 
     private var statusLine: String {
@@ -124,5 +184,115 @@ struct MainWindowView: View {
         let minutes = Int(remaining) / 60
         let seconds = Int(remaining) % 60
         return minutes > 0 ? "Fading out in \(minutes)m" : "Fading out in \(seconds)s"
+    }
+}
+
+/// What the weather falls in front of. The overlay has the desktop behind it;
+/// the window needs a sky of its own, and each scene gets the one it belongs
+/// to — overcast blue-grey for rain, near-black for a storm, a warm dark for
+/// a fire, with a glow rising from the bottom edge where the embers start.
+private struct Sky: View {
+    let scene: Scene
+
+    var body: some View {
+        LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+            .animation(.easeInOut(duration: 0.7), value: scene)
+            .ignoresSafeArea()
+    }
+
+    private var colors: [Color] {
+        switch scene {
+        case .rain:     return [Color(red: 0.16, green: 0.21, blue: 0.27), Color(red: 0.05, green: 0.07, blue: 0.10)]
+        case .thunder:  return [Color(red: 0.09, green: 0.10, blue: 0.15), Color(red: 0.03, green: 0.03, blue: 0.05)]
+        case .campfire: return [Color(red: 0.04, green: 0.04, blue: 0.08), Color(red: 0.10, green: 0.07, blue: 0.05)]
+        }
+    }
+}
+
+/// A warm bloom from the bottom edge, where the embers start.
+private struct FireGlow: View {
+    let visible: Bool
+
+    var body: some View {
+        RadialGradient(
+            colors: [
+                Color(red: 1.0, green: 0.58, blue: 0.22).opacity(0.5),
+                Color(red: 1.0, green: 0.45, blue: 0.15).opacity(0.18),
+                .clear
+            ],
+            center: UnitPoint(x: 0.5, y: 1.08),
+            startRadius: 0, endRadius: 360
+        )
+        .blendMode(.screen)
+        .opacity(visible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.7), value: visible)
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+}
+
+/// A slider drawn as a hairline: a 2-point track, a white fill, a small round
+/// thumb. The system slider is right for a form; over a picture it is
+/// furniture. Keyboard and VoiceOver still get a proper adjustable control.
+private struct HairlineSlider: View {
+    let label: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    init(label: String, value: Binding<Double>, in range: ClosedRange<Double>) {
+        self.label = label
+        self._value = value
+        self.range = range
+    }
+
+    private var fraction: Double {
+        (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.7))
+
+            GeometryReader { geo in
+                let width = geo.size.width
+                let x = max(7, min(width - 7, fraction * width))
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.25))
+                        .frame(height: 2)
+                    Capsule()
+                        .fill(.white)
+                        .frame(width: x, height: 2)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 14, height: 14)
+                        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+                        .offset(x: x - 7)
+                }
+                .frame(height: 18)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { drag in
+                            let f = max(0, min(1, drag.location.x / width))
+                            value = range.lowerBound + f * (range.upperBound - range.lowerBound)
+                        }
+                )
+            }
+            .frame(height: 18)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue("\(Int(fraction * 100)) percent")
+        .accessibilityAdjustableAction { direction in
+            let step = (range.upperBound - range.lowerBound) / 20
+            switch direction {
+            case .increment: value = min(range.upperBound, value + step)
+            case .decrement: value = max(range.lowerBound, value - step)
+            @unknown default: break
+            }
+        }
     }
 }

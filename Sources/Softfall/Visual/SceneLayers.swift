@@ -23,6 +23,13 @@ final class SceneLayers {
     private var size: CGSize = .zero
     private var scale: CGFloat = 2
     private var embersWereOff = true
+    /// The overlay fades to the user's visibility setting; a scene that lives
+    /// inside a window of its own wants to be seen in full. Set once by the
+    /// owner, never by state.
+    var opacityOverride: Float?
+    /// Multiplies the ember birth rate. The overlay leaves it at 1; a small
+    /// close-up view wants more of them than its area alone would earn.
+    var emberScale: Float = 1
 
     /// Overall drop opacity, dialled in against a real desktop rather than
     /// guessed. How blue the rain is comes from the mix state instead — that
@@ -163,7 +170,7 @@ final class SceneLayers {
         let wash = Float(min(0.26, max(state.effectiveDensity(.rain) * 0.38,
                                        state.effectiveDensity(.embers) * 0.26)))
 
-        let target = Float(state.isPlaying ? state.opacity : 0)
+        let target = opacityOverride ?? Float(state.isPlaying ? state.opacity : 0)
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.7)
         root.opacity = target
@@ -174,7 +181,7 @@ final class SceneLayers {
     private func updateEmbers(state: MixState) {
         let density = state.effectiveDensity(.embers)
         let areaScale = Float(max(size.width / 1920.0, 0.6))
-        let rate = Float(density * 85) * areaScale
+        let rate = Float(density * 85) * areaScale * emberScale
 
         guard rate > 0 else {
             embers.setValue(0, forKeyPath: "emitterCells.embers.birthRate")

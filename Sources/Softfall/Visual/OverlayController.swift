@@ -25,6 +25,9 @@ final class OverlayController: NSObject {
     /// last applied configuration is remembered.
     private var appliedPlacement: OverlayPlacement?
     private var appliedFullScreenPolicy: Bool?
+    /// Anything else that wants to light up with the sky — the main window's
+    /// own copy of the scene — hangs off here.
+    var onFlash: ((Double) -> Void)?
 
     init(state: MixState) {
         self.state = state
@@ -188,6 +191,7 @@ final class OverlayController: NSObject {
         for (_, screen) in screens {
             screen.scene.flashLightning(distance: distance, opacityScale: state.opacity)
         }
+        onFlash?(distance)
     }
 
     func tearDown() {

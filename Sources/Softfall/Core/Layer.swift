@@ -60,8 +60,8 @@ enum Scene: String, CaseIterable, Codable, Identifiable {
 
     var blurb: String {
         switch self {
-        case .rain:     return "Steady rain, and the sound of it."
-        case .thunder:  return "Rain with lightning, and rumble following after."
+        case .rain:     return "Falling over your desktop."
+        case .thunder:  return "Rumble arrives after the flash."
         case .campfire: return "Embers lifting, wood cracking."
         }
     }

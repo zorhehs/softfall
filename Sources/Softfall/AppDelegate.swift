@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ducker: AudioDucker!
     private var menuBar: MenuBarController!
     private var window: MainWindowController!
+    private var preview: ScenePreview!
     private var appMenu: AppMenuController!
     private var settings: SettingsWindowController!
     private var tickTimer: Timer?
@@ -41,7 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         settings = SettingsWindowController(state: state)
-        window = MainWindowController(state: state) { [weak self] in self?.settings.show() }
+        preview = ScenePreview(state: state)
+        window = MainWindowController(state: state, preview: preview) { [weak self] in self?.settings.show() }
+        // The window's copy of the sky flashes in the same instant as the desktop.
+        overlay.onFlash = { [weak self] distance in self?.preview.flashLightning(distance: distance) }
 
         // The menu bar item no longer owns a popover — it opens the window, or
         // offers the quick menu on a right-click.
@@ -103,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stateChanged() {
         sound.apply(state)
         overlay.refresh()
+        preview.refresh()
         menuBar.updateIcon()
         applyPowerPolicy()
         syncLoginItem()
