@@ -17,14 +17,18 @@ import QuartzCore
 /// hold on to between strikes, for a shape that occupies a fraction of it.
 final class LightningLayer: CALayer {
 
-    /// Struck yellow rather than the blue-white of the real thing. That is a
-    /// deliberate look, not an accident of the physics.
-    private static let core = CGColor(red: 1.00, green: 0.97, blue: 0.80, alpha: 1)
-    private static let inner = CGColor(red: 1.00, green: 0.88, blue: 0.42, alpha: 1)
-    private static let outer = CGColor(red: 1.00, green: 0.76, blue: 0.20, alpha: 1)
+    /// A blue-white core — the colour of the real thing — wrapped in a yellow
+    /// glow that is not. The pairing was chosen by eye against a preview: all
+    /// yellow read as a cartoon, all blue vanished into the rain.
+    private static let core = CGColor(red: 0.82, green: 0.93, blue: 1.00, alpha: 1)
+    private static let inner = CGColor(red: 0.42, green: 0.70, blue: 1.00, alpha: 1)
+    private static let glow = CGColor(red: 1.00, green: 0.89, blue: 0.47, alpha: 1)
+    private static let halo = CGColor(red: 1.00, green: 0.80, blue: 0.27, alpha: 1)
+    private static let outer = CGColor(red: 1.00, green: 0.73, blue: 0.16, alpha: 1)
 
-    /// Beyond this the strike is behind cloud: a bloom, no visible bolt.
-    private static let boltVisibleWithin: Double = 0.62
+    /// Beyond this the strike is behind cloud: a bloom, no visible bolt. Most
+    /// strikes now show a shape; only the furthest are pure sheet lightning.
+    static let boltVisibleWithin: Double = 0.85
 
     private var path: CGPath?
     private var strength: CGFloat = 1
@@ -58,19 +62,23 @@ final class LightningLayer: CALayer {
     ///   - opacityScale: the overlay's own opacity setting.
     ///   - size: the screen, in points. The bolt is placed within it and then
     ///     the layer shrinks to fit what it drew.
-    func strike(distance: Double, opacityScale: Double, in size: CGSize, scale: CGFloat) {
+    /// - Returns: where the bolt left the top of the screen, in points, so the
+    ///   sheet flash can bloom from the same place. `nil` when the strike was
+    ///   too far off to draw.
+    @discardableResult
+    func strike(distance: Double, opacityScale: Double, in size: CGSize, scale: CGFloat) -> CGPoint? {
         let d = min(max(distance, 0), 1)
-        guard d < Self.boltVisibleWithin, size.width > 0, size.height > 0 else { return }
+        guard d < Self.boltVisibleWithin, size.width > 0, size.height > 0 else { return nil }
 
         // Near strikes are thicker, brighter and reach further down the screen.
         let nearness = CGFloat(1 - d / Self.boltVisibleWithin)
         strength = 0.45 + nearness * 0.55
 
-        let built = Self.makeBolt(in: size, nearness: nearness)
-        let padding = 26 * strength
+        let (built, origin) = Self.makeBolt(in: size, nearness: nearness)
+        let padding = 34 * strength
         var box = built.boundingBoxOfPath.insetBy(dx: -padding, dy: -padding)
         box = box.intersection(CGRect(origin: .zero, size: size).insetBy(dx: -padding, dy: -padding))
-        guard !box.isNull, box.width > 1, box.height > 1 else { return }
+        guard !box.isNull, box.width > 1, box.height > 1 else { return nil }
 
         // Move the path into the layer's own coordinates so the backing store
         // only has to cover the bolt.
@@ -89,11 +97,19 @@ final class LightningLayer: CALayer {
         removeAllAnimations()
         let flicker = CAKeyframeAnimation(keyPath: "opacity")
         let peak = Float(min(max(opacityScale, 0), 1))
-        // Two strokes and a die-back. Even, regular pulsing reads as a lamp.
-        flicker.values = [0, peak, peak * 0.18, peak * 0.92, peak * 0.25, peak * 0.5, 0]
-        flicker.keyTimes = [0, 0.02, 0.09, 0.14, 0.26, 0.36, 1.0]
-        flicker.duration = 0.42 + Double(1 - nearness) * 0.35
-        flicker.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        // A dim leader, the main return stroke, two more down the same
+        // channel, then an afterglow that fades rather than cuts. Even,
+        // regular pulsing reads as a lamp.
+        let glow = peak * Float(0.10 + nearness * 0.12)
+        let keyframes: [(time: Double, value: Float)] = [
+            (0.000, 0), (0.015, peak * 0.45), (0.050, peak * 0.12), (0.080, peak),
+            (0.140, peak * 0.22), (0.190, peak * 0.85), (0.260, peak * 0.18),
+            (0.320, peak * 0.55), (0.420, glow), (0.700, glow * 0.6), (1.050, 0)
+        ]
+        flicker.duration = 1.25 + Double(1 - nearness) * 0.4
+        flicker.values = keyframes.map { $0.value }
+        flicker.keyTimes = keyframes.map { NSNumber(value: $0.time / flicker.duration) }
+        flicker.timingFunction = CAMediaTimingFunction(name: .linear)
         flicker.isRemovedOnCompletion = true
         add(flicker, forKey: "strike")
 
@@ -105,6 +121,7 @@ final class LightningLayer: CALayer {
             self.contents = nil
             self.path = nil
         }
+        return origin
     }
 
     // MARK: Shape
@@ -113,7 +130,7 @@ final class LightningLayer: CALayer {
     /// middle sideways by a shrinking amount. It is the standard way to get a
     /// line that looks like it was torn rather than drawn, and it is what makes
     /// the bolt read as lightning rather than as a zigzag.
-    private static func makeBolt(in size: CGSize, nearness: CGFloat) -> CGPath {
+    private static func makeBolt(in size: CGSize, nearness: CGFloat) -> (path: CGPath, origin: CGPoint) {
         let startX = CGFloat.random(in: size.width * 0.12...size.width * 0.88)
         // Coordinates are y-up: the bolt starts above the top edge and comes
         // down. Near strikes reach further; distant ones peter out high up.
@@ -129,9 +146,9 @@ final class LightningLayer: CALayer {
         let path = CGMutablePath()
         path.addLines(between: points)
 
-        // One or two forks, branching off the upper half and travelling less
+        // Two or three forks, branching off the upper half and travelling less
         // far. A bolt with no forks looks like a crack in the screen.
-        let forks = Int.random(in: 1...2)
+        let forks = Int.random(in: 2...3)
         for _ in 0..<forks {
             guard points.count > 6 else { break }
             let index = Int.random(in: 2...(points.count - 3))
@@ -144,7 +161,7 @@ final class LightningLayer: CALayer {
             path.addLines(between: branch)
         }
 
-        return path
+        return (path, CGPoint(x: startX, y: size.height))
     }
 
     private static func displace(_ input: [CGPoint], jitter: CGFloat, steps: Int) -> [CGPoint] {
@@ -182,13 +199,14 @@ final class LightningLayer: CALayer {
         // the way a real one does.
         ctx.setBlendMode(.plusLighter)
 
-        // Widest and dimmest first, finishing with a thin hot core.
+        // Widest and dimmest first — the yellow — finishing with the thin
+        // blue-white core.
         let passes: [(width: CGFloat, alpha: CGFloat, colour: CGColor)] = [
-            (22 * strength, 0.05, Self.outer),
-            (12 * strength, 0.10, Self.outer),
-            (6.5 * strength, 0.22, Self.inner),
-            (3.0 * strength, 0.55, Self.inner),
-            (1.4 * strength, 0.95, Self.core)
+            (32 * strength, 0.05, Self.outer),
+            (17 * strength, 0.11, Self.halo),
+            (8.0 * strength, 0.22, Self.glow),
+            (4.4 * strength, 0.85, Self.inner),
+            (1.6 * strength, 1.00, Self.core)
         ]
 
         for pass in passes {

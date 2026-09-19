@@ -19,7 +19,7 @@ final class SceneLayers {
     private let rain = RainLayer()
     private let embers = CAEmitterLayer()
     private let lightning = LightningLayer()
-    private let flash = CALayer()
+    private let flash = CAGradientLayer()
     private var size: CGSize = .zero
     private var scale: CGFloat = 2
     private var embersWereOff = true
@@ -59,12 +59,22 @@ final class SceneLayers {
         root.addSublayer(embers)
 
         // The sheet of light sits under the bolt, so the bolt stays legible
-        // against its own flash.
+        // against its own flash. It is a radial bloom from wherever the bolt
+        // left the cloud: blue-white at the source, yellow across the rest of
+        // the sky, gone at the edges — a flat wash lit the whole desktop like
+        // a camera flash.
         flash.frame = CGRect(origin: .zero, size: size)
-        // Warm rather than pure white, to agree with the yellow of the bolt.
-        flash.backgroundColor = NSColor(calibratedRed: 1.0, green: 0.96, blue: 0.84, alpha: 1.0).cgColor
+        flash.type = .radial
+        flash.colors = [
+            NSColor(calibratedRed: 0.75, green: 0.87, blue: 1.00, alpha: 1.00).cgColor,
+            NSColor(calibratedRed: 1.00, green: 0.89, blue: 0.51, alpha: 0.55).cgColor,
+            NSColor(calibratedRed: 1.00, green: 0.82, blue: 0.31, alpha: 0.25).cgColor,
+            NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.24, alpha: 0.00).cgColor
+        ]
+        flash.locations = [0, 0.28, 0.6, 1.0]
         flash.opacity = 0
         flash.isHidden = true
+        flash.actions = ["startPoint": NSNull(), "endPoint": NSNull(), "hidden": NSNull()]
         root.addSublayer(flash)
 
         root.addSublayer(lightning)
@@ -203,32 +213,37 @@ final class SceneLayers {
         // together. The bolt decides for itself whether it is close enough to
         // be visible at all — a distant strike is behind cloud, and all you
         // get is the bloom.
-        lightning.strike(distance: d, opacityScale: opacityScale, in: size, scale: scale)
+        let origin = lightning.strike(distance: d, opacityScale: opacityScale, in: size, scale: scale)
 
-        // Pull the sheet down when there is a bolt to see. At full strength it
-        // washes out the very thing it is meant to announce.
-        let hasBolt = d < 0.62
-        let peak = Float(lerp(0.40, 0.07, d) * opacityScale * (hasBolt ? 0.55 : 1.0))
+        let peak = Float(lerp(0.42, 0.10, d) * opacityScale)
         guard peak > 0.005 else { return }
+
+        // Bloom from the bolt's root when there is one; from somewhere along
+        // the top edge when the strike is behind cloud.
+        let x = origin.map { $0.x / size.width } ?? CGFloat.random(in: 0.2...0.8)
+        let radius = 0.9 * max(size.width, size.height)
+        flash.startPoint = CGPoint(x: x, y: 1.0)
+        flash.endPoint = CGPoint(x: x + radius / size.width, y: 1.0 - radius / size.height)
 
         flash.isHidden = false
         flash.removeAllAnimations()
 
+        // The same strokes as the bolt — leader, return, two more, afterglow —
+        // so the sky flickers in time with the channel.
+        let keyframes: [(time: Double, value: Float)] = [
+            (0.000, 0), (0.015, peak * 0.5), (0.050, peak * 0.1), (0.080, peak),
+            (0.140, peak * 0.25), (0.190, peak * 0.8), (0.320, peak * 0.3),
+            (0.600, peak * 0.08), (1.200, 0)
+        ]
         let animation = CAKeyframeAnimation(keyPath: "opacity")
-        if d < 0.45 {
-            // Close strikes flicker — one short stroke, then the main one.
-            animation.values = [0, peak * 0.55, peak * 0.1, peak, 0]
-            animation.keyTimes = [0, 0.04, 0.10, 0.16, 1.0]
-            animation.duration = lerp(0.55, 1.1, d)
-        } else {
-            // Distant sheet lightning: a soft bloom with no hard edge.
-            animation.values = [0, peak, 0]
-            animation.keyTimes = [0, 0.3, 1.0]
-            animation.duration = lerp(1.1, 1.9, d)
-        }
-        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        animation.duration = 1.25 + d * 0.4
+        animation.values = keyframes.map { $0.value }
+        animation.keyTimes = keyframes.map { NSNumber(value: $0.time / animation.duration) }
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
         animation.isRemovedOnCompletion = true
         flash.add(animation, forKey: "flash")
+
+        rain.lightUp()
     }
 
     func resize(to newSize: CGSize, scale newScale: CGFloat) {
