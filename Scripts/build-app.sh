@@ -6,19 +6,55 @@
 # easier to read, review and reproduce than a generated pbxproj, and it builds
 # identically on a laptop and on a CI runner.
 #
-# Usage: Scripts/build-app.sh [version]
+# Usage: Scripts/build-app.sh [version] [--dev]
+#
+#   --dev  builds a side-by-side development copy: its own name, its own bundle
+#          identifier, its own saved settings, and only your machine's
+#          architecture so it takes seconds rather than minutes.
+#
+# The point of --dev is that a source build and an installed copy used to share
+# the identifier io.github.zorhehs.softfall. macOS then treats them as one app,
+# so `open -a Softfall` picks whichever it likes and you cannot tell which
+# binary you are looking at. A separate identifier ends that for good, and means
+# testing a branch no longer needs a release to carry it to you.
 
 set -euo pipefail
 
-VERSION="${1:-0.1.0}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/dist/Softfall.app"
-BUNDLE_ID="io.github.zorhehs.softfall"
+VERSION=""
+DEV=0
+for arg in "$@"; do
+    case "$arg" in
+        --dev) DEV=1 ;;
+        *)     VERSION="$arg" ;;
+    esac
+done
+VERSION="${VERSION:-0.1.0}"
 
-echo "==> Building Softfall $VERSION (universal)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ $DEV -eq 1 ]]; then
+    APP_NAME="SoftfallDev"
+    DISPLAY_NAME="Softfall Dev"
+    BUNDLE_ID="io.github.zorhehs.softfall.dev"
+    VERSION="$VERSION-dev"
+else
+    APP_NAME="Softfall"
+    DISPLAY_NAME="Softfall"
+    BUNDLE_ID="io.github.zorhehs.softfall"
+fi
+APP="$ROOT/dist/$APP_NAME.app"
+
 cd "$ROOT"
 rm -rf dist
-swift build -c release --arch arm64 --arch x86_64
+
+if [[ $DEV -eq 1 ]]; then
+    # One architecture, because the only machine that has to run it is this one.
+    echo "==> Building $DISPLAY_NAME $VERSION (this Mac only)"
+    swift build -c release
+else
+    echo "==> Building Softfall $VERSION (universal)"
+    swift build -c release --arch arm64 --arch x86_64
+fi
 
 # SwiftPM puts a multi-architecture build somewhere different from a
 # single-architecture one, so look in both places.
@@ -38,10 +74,7 @@ fi
 echo "==> Assembling the bundle"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Keep local builds out of Spotlight. A source build and an installed copy share
-# a bundle identifier, so LaunchServices treats them as the same app and picks
-# between them on its own terms — which means `open -a Softfall` can silently
-# launch the wrong one. Launch test builds by path instead: open dist/Softfall.app
+# Keep local builds out of Spotlight so a dev copy never clutters search.
 : > "$ROOT/dist/.metadata_never_index"
 cp "$BINARY" "$APP/Contents/MacOS/Softfall"
 chmod +x "$APP/Contents/MacOS/Softfall"
@@ -65,8 +98,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Softfall</string>
-    <key>CFBundleDisplayName</key><string>Softfall</string>
+    <key>CFBundleName</key><string>$DISPLAY_NAME</string>
+    <key>CFBundleDisplayName</key><string>$DISPLAY_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleExecutable</key><string>Softfall</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -97,3 +130,10 @@ else
 fi
 
 echo "==> Done: $APP"
+if [[ $DEV -eq 1 ]]; then
+    echo
+    echo "    open \"$APP\""
+    echo
+    echo "    Runs alongside the installed Softfall with its own settings."
+    echo "    Quit it from its own menu bar icon when you are finished."
+fi

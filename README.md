@@ -119,9 +119,19 @@ the display sleeps, the screen locks, or nothing is on screen.
 ```sh
 git clone https://github.com/zorhehs/softfall.git
 cd softfall
-Scripts/build-app.sh
-open dist/Softfall.app
+Scripts/build-app.sh --dev
+open dist/SoftfallDev.app
 ```
+
+`--dev` builds **Softfall Dev**: its own name, its own bundle identifier, its
+own saved settings, and only your Mac's architecture, so it takes seconds
+rather than minutes. It runs alongside an installed Softfall without either one
+shadowing the other — which matters, because two bundles sharing an identifier
+leave macOS to pick between them, and `open -a Softfall` will then sometimes
+launch a build you did not mean to test.
+
+Drop `--dev` for the real thing: universal, properly named, what the release
+workflow builds.
 
 There is no Xcode project — just a Swift package and one shell script that
 assembles the bundle. Easier to read, easier to review, and it builds the same
